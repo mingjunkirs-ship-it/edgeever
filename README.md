@@ -104,19 +104,75 @@ content_markdown  API、Agent、导入导出使用
 content_text      搜索、摘要和索引使用
 ```
 
-## Agent / CLI
+## MCP / CLI
 
-在设置里创建 API Token 后，可以给 MCP 或 CLI 使用：
+先在 EdgeEver 左侧 **设置** 里创建 API Token。给只读 Agent 使用时建议只勾选 `read:notebooks`、`read:memos`、`read:tags`；需要写入、移动、合并或上传附件时再增加对应 `write:*` scope。
+
+### CLI
+
+CLI 使用 API Token 访问同一套 REST API。可以直接用环境变量：
 
 ```sh
-bun run cli -- profile set local --url https://你的域名 --token <api-token>
-bun run cli -- --profile local search edgeever
-bun run cli -- --profile local create --notebook nb_inbox --title Hello --body "来自 CLI"
+EDGEEVER_URL=https://你的域名 \
+EDGEEVER_TOKEN=<api-token> \
+bun run cli -- search edgeever
 ```
+
+也可以保存为本机 profile，配置文件默认写入 `~/.edgeever/config.json`：
+
+```sh
+bun run cli -- profile set prod --url https://你的域名 --token <api-token>
+bun run cli -- --profile prod notebooks
+bun run cli -- --profile prod tags
+bun run cli -- --profile prod search edgeever
+bun run cli -- --profile prod get <memo-id>
+bun run cli -- --profile prod create --notebook <notebook-id> --title Hello --body "来自 CLI"
+bun run cli -- --profile prod update <memo-id> --tags edgeever,cli
+bun run cli -- --profile prod move --notebook <notebook-id> <memo-id...>
+bun run cli -- --profile prod merge --notebook <notebook-id> --title "合并笔记" <memo-id...>
+bun run cli -- --profile prod upload --memo <memo-id> --file ./image.png --type image/png
+bun run cli -- --profile prod export <memo-id> --format markdown --out ./memo.md
+```
+
+### MCP
 
 MCP endpoint：
 
 ```text
 https://你的域名/mcp
 Authorization: Bearer <api-token>
+```
+
+当前 MCP 使用 Streamable HTTP / JSON-RPC 入口，支持 `initialize`、`tools/list`、`tools/call` 和 batch request。已暴露的 tools：
+
+```text
+search_memos
+get_memo
+create_memo
+update_memo
+move_memos
+merge_memos
+move_notebook
+list_notebooks
+list_tags
+```
+
+最小调用示例：
+
+```sh
+curl https://你的域名/mcp \
+  -H "Authorization: Bearer <api-token>" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "jsonrpc": "2.0",
+    "id": 1,
+    "method": "tools/call",
+    "params": {
+      "name": "search_memos",
+      "arguments": {
+        "query": "edgeever",
+        "limit": 10
+      }
+    }
+  }'
 ```
