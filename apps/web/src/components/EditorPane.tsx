@@ -19,6 +19,7 @@ import {
   Pencil,
   Sparkles,
   Search,
+  Type,
   X,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -278,6 +279,7 @@ export const EditorPane = ({
     typeof window === "undefined" ? false : window.matchMedia(MOBILE_EDITOR_QUERY).matches
   );
   const [isMobileEditing, setIsMobileEditing] = useState(false);
+  const [mobileToolbarOpen, setMobileToolbarOpen] = useState(false);
   const notebookOptions = useMemo(() => getNotebookMoveOptions(notebooks), [notebooks]);
   const readOnly = isTrashView || Boolean(memo?.isDeleted);
   const effectiveReadOnly = readOnly || (isMobileViewport && !isMobileEditing);
@@ -304,6 +306,7 @@ export const EditorPane = ({
 
   useEffect(() => {
     setIsMobileEditing(false);
+    setMobileToolbarOpen(false);
   }, [memo?.id]);
 
   useEffect(() => {
@@ -967,15 +970,20 @@ export const EditorPane = ({
   const handleMobileDone = () => {
     if (readOnly || !editor || !hasUnsavedChanges) {
       setIsMobileEditing(false);
+      setMobileToolbarOpen(false);
       return;
     }
 
     saveMutation.mutate(undefined, {
-      onSuccess: () => setIsMobileEditing(false),
+      onSuccess: () => {
+        setIsMobileEditing(false);
+        setMobileToolbarOpen(false);
+      },
       onError: (error) => {
         const sourceError = error instanceof MemoSaveRequestError ? error.originalError : error;
         if (error instanceof MemoSaveRequestError && shouldQueueMemoSaveError(sourceError)) {
           setIsMobileEditing(false);
+          setMobileToolbarOpen(false);
         }
       },
     });
@@ -1087,6 +1095,20 @@ export const EditorPane = ({
                 onClick={() => fileInputRef.current?.click()}
               >
                 <Paperclip className="h-4 w-4" />
+              </Button>
+            )}
+            {isMobileEditing && !readOnly && (
+              <Button
+                className="sm:hidden"
+                size="icon"
+                variant={mobileToolbarOpen ? "soft" : "ghost"}
+                title={mobileToolbarOpen ? "收起格式" : "格式"}
+                aria-label={mobileToolbarOpen ? "收起格式" : "格式"}
+                aria-pressed={mobileToolbarOpen}
+                disabled={effectiveReadOnly}
+                onClick={() => setMobileToolbarOpen((open) => !open)}
+              >
+                <Type className="h-4 w-4" />
               </Button>
             )}
             <Button className="hidden sm:inline-flex" size="icon" variant="ghost" title="搜索当前笔记" aria-label="搜索当前笔记" onClick={() => openNoteSearch()}>
@@ -1327,7 +1349,7 @@ export const EditorPane = ({
             </Button>
           </div>
         )}
-        {(!isMobileViewport || isMobileEditing) && <EditorToolbar editor={editor} readOnly={effectiveReadOnly} />}
+        {(!isMobileViewport || mobileToolbarOpen) && <EditorToolbar editor={editor} readOnly={effectiveReadOnly} />}
       </header>
 
       <div className="edgeever-editor min-h-0 flex-1 overflow-y-auto bg-white">
