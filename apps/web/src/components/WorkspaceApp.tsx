@@ -13,7 +13,7 @@ import {
   type PointerEvent as ReactPointerEvent,
 } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { Home, Search, UserRound, Plus, ChevronDown, ChevronRight, X } from "lucide-react";
+import { Home, Search, UserRound, Plus, ChevronDown, ChevronRight, RefreshCw, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
   Drawer,
@@ -63,6 +63,30 @@ import { useBrowserBackLayer } from "@/lib/app-hooks";
 import type { SyncQueueSummary } from "@/lib/sync-queue";
 
 const isDesktopViewport = () => window.matchMedia("(min-width: 1024px)").matches;
+const PULL_TO_REFRESH_TRIGGER_PX = 72;
+const PULL_TO_REFRESH_MAX_PX = 96;
+
+const isStandaloneApp = () =>
+  window.matchMedia("(display-mode: standalone)").matches ||
+  window.matchMedia("(display-mode: fullscreen)").matches ||
+  Boolean((navigator as Navigator & { standalone?: boolean }).standalone);
+
+const getVerticalScrollContainer = (target: EventTarget | null) => {
+  let element = target instanceof HTMLElement ? target : null;
+
+  while (element && element !== document.body) {
+    const style = window.getComputedStyle(element);
+    const canScroll = /(auto|scroll)/.test(style.overflowY) && element.scrollHeight > element.clientHeight;
+
+    if (canScroll) {
+      return element;
+    }
+
+    element = element.parentElement;
+  }
+
+  return null;
+};
 
 const EditorPane = lazy(() => import("./EditorPane").then((module) => ({ default: module.EditorPane })));
 const AssetsPane = lazy(() => import("./AssetsPane").then((module) => ({ default: module.AssetsPane })));
@@ -454,6 +478,9 @@ export const WorkspaceApp = ({
   const [isOnline, setIsOnline] = useState(() => (typeof navigator === "undefined" ? true : navigator.onLine));
   const [isDesktop, setIsDesktop] = useState(isDesktopViewport);
   const [isSyncingQueuedChanges, setIsSyncingQueuedChanges] = useState(false);
+  const [pullToRefreshDistance, setPullToRefreshDistance] = useState(0);
+  const [isPullRefreshing, setIsPullRefreshing] = useState(false);
+  const isPullRefreshingRef = useRef(false);
 
   const [mobileListActionsOpen, setMobileListActionsOpen] = useState(false);
   const [mobileMoveOpen, setMobileMoveOpen] = useState(false);
@@ -486,6 +513,27 @@ export const WorkspaceApp = ({
     }
   }, [queryClient]);
 
+  const refreshLatestMemos = useCallback(async () => {
+    if (typeof navigator !== "undefined" && !navigator.onLine) {
+      setIsOnline(false);
+      setPullToRefreshDistance(0);
+      return;
+    }
+
+    setIsPullRefreshing(true);
+
+    try {
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ["memos"] }),
+        queryClient.invalidateQueries({ queryKey: ["memo"] }),
+        queryClient.invalidateQueries({ queryKey: ["notebooks"] }),
+      ]);
+    } finally {
+      setIsPullRefreshing(false);
+      setPullToRefreshDistance(0);
+    }
+  }, [queryClient]);
+
   const notebooksQuery = useQuery({
     queryKey: ["notebooks"],
     queryFn: () => api.listNotebooks(),
@@ -514,6 +562,21 @@ export const WorkspaceApp = ({
       memoSelectionModeActive ||
       activePane === "editor" ||
       activePane === "notebooks"
+  );
+  const mobilePullToRefreshActive = Boolean(
+    !isDesktop &&
+      activePane === "memos" &&
+      !appNoticeDialog &&
+      !notebookDeleteConfirmation &&
+      !notebookNameDialog &&
+      !memoDeleteConfirmation &&
+      !emptyTrashConfirmationOpen &&
+      !mobileNotebookPickerOpen &&
+      !mobileListActionsOpen &&
+      !mobileMoveOpen &&
+      !mobileMoreOpen &&
+      !tagsOpen &&
+      !templatesOpen
   );
 
   const clearMemoSelection = useCallback(() => {
@@ -599,6 +662,102 @@ export const WorkspaceApp = ({
 
     return () => mediaQuery.removeEventListener("change", updateDesktopState);
   }, []);
+
+  useEffect(() => {
+    isPullRefreshingRef.current = isPullRefreshing;
+  }, [isPullRefreshing]);
+
+  useEffect(() => {
+    if (!mobilePullToRefreshActive || !isStandaloneApp()) {
+      setPullToRefreshDistance(0);
+      return;
+    }
+
+    let tracking = false;
+    let startX = 0;
+    let startY = 0;
+    let currentDistance = 0;
+    let scrollContainer: HTMLElement | null = null;
+
+    const reset = () => {
+      tracking = false;
+      startX = 0;
+      startY = 0;
+      currentDistance = 0;
+      scrollContainer = null;
+      setPullToRefreshDistance(0);
+    };
+
+    const handleTouchStart = (event: TouchEvent) => {
+      if (event.touches.length !== 1 || isPullRefreshingRef.current || isTextEntryTarget(event.target)) {
+        return;
+      }
+
+      scrollContainer = getVerticalScrollContainer(event.target);
+
+      if ((scrollContainer && scrollContainer.scrollTop > 0) || (!scrollContainer && window.scrollY > 0)) {
+        return;
+      }
+
+      const touch = event.touches[0];
+      tracking = true;
+      startX = touch.clientX;
+      startY = touch.clientY;
+    };
+
+    const handleTouchMove = (event: TouchEvent) => {
+      if (!tracking || event.touches.length !== 1) {
+        return;
+      }
+
+      if ((scrollContainer && scrollContainer.scrollTop > 0) || (!scrollContainer && window.scrollY > 0)) {
+        reset();
+        return;
+      }
+
+      const touch = event.touches[0];
+      const deltaY = touch.clientY - startY;
+      const deltaX = Math.abs(touch.clientX - startX);
+
+      if (deltaY <= 0 || deltaX > deltaY) {
+        reset();
+        return;
+      }
+
+      currentDistance = Math.min(PULL_TO_REFRESH_MAX_PX, deltaY * 0.55);
+
+      if (currentDistance > 8) {
+        event.preventDefault();
+        setPullToRefreshDistance(currentDistance);
+      }
+    };
+
+    const handleTouchEnd = () => {
+      if (!tracking) {
+        return;
+      }
+
+      const shouldRefresh = currentDistance >= PULL_TO_REFRESH_TRIGGER_PX;
+      reset();
+
+      if (shouldRefresh) {
+        setPullToRefreshDistance(PULL_TO_REFRESH_TRIGGER_PX);
+        void refreshLatestMemos();
+      }
+    };
+
+    document.addEventListener("touchstart", handleTouchStart, { passive: true });
+    document.addEventListener("touchmove", handleTouchMove, { passive: false });
+    document.addEventListener("touchend", handleTouchEnd, { passive: true });
+    document.addEventListener("touchcancel", reset, { passive: true });
+
+    return () => {
+      document.removeEventListener("touchstart", handleTouchStart);
+      document.removeEventListener("touchmove", handleTouchMove);
+      document.removeEventListener("touchend", handleTouchEnd);
+      document.removeEventListener("touchcancel", reset);
+    };
+  }, [mobilePullToRefreshActive, refreshLatestMemos]);
 
   useEffect(() => {
     const updateOnlineState = () => {
@@ -1497,9 +1656,24 @@ export const WorkspaceApp = ({
   const shouldRenderRightPane = isDesktop || activePane === "editor";
   const rightPaneLoadingLabel =
     rightView === "settings" ? "正在加载个人中心" : rightView === "assets" ? "正在加载资源库" : "正在加载编辑器";
+  const pullToRefreshVisible = pullToRefreshDistance > 0 || isPullRefreshing;
+  const pullToRefreshReady = pullToRefreshDistance >= PULL_TO_REFRESH_TRIGGER_PX;
+  const pullToRefreshLabel = isPullRefreshing ? "正在拉取最新笔记" : pullToRefreshReady ? "松开刷新" : "下拉刷新";
 
   return (
     <div className="flex h-[100dvh] overflow-hidden bg-emerald-50 text-slate-950">
+      {pullToRefreshVisible && (
+        <div
+          className="pointer-events-none fixed inset-x-0 top-[max(0.75rem,env(safe-area-inset-top))] z-50 flex justify-center lg:hidden"
+          style={{ transform: `translateY(${Math.max(0, pullToRefreshDistance - 24)}px)` }}
+          aria-hidden="true"
+        >
+          <div className="inline-flex h-9 items-center gap-2 rounded-full border border-emerald-100 bg-white/95 px-3 text-xs font-semibold text-slate-600 shadow-[0_10px_28px_rgba(15,23,42,0.12)] backdrop-blur">
+            <RefreshCw className={cn("h-4 w-4 text-emerald-600", (isPullRefreshing || pullToRefreshReady) && "animate-spin")} />
+            <span>{pullToRefreshLabel}</span>
+          </div>
+        </div>
+      )}
       <div className="min-w-0 flex-1">
         <main
           className={cn(

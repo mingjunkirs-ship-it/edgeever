@@ -34,7 +34,6 @@ import {
   Layers,
   Settings,
   MoreVertical,
-  RefreshCw,
   CheckCircle2,
   TagX,
 } from "lucide-react";
@@ -50,7 +49,7 @@ import {
 import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from "@/components/ui/select";
 import { MemoCard } from "./MemoCard";
 import { cn } from "@/lib/utils";
-import type { Notebook, AuthUser, MemoSummary } from "@edgeever/shared";
+import type { Notebook, MemoSummary } from "@edgeever/shared";
 import type {
   MemoFilterMode,
   MemoSortMode,
@@ -179,40 +178,7 @@ const CheckCircleCheck = ({ className }: { className?: string }) => (
   </svg>
 );
 
-const MobileHomeHeader = ({
-  user,
-  isOnline,
-  isSyncingQueuedChanges,
-  onSyncQueuedChanges,
-}: {
-  user: AuthUser | null;
-  isOnline: boolean;
-  isSyncingQueuedChanges: boolean;
-  onSyncQueuedChanges: () => void;
-}) => (
-  <div className="mb-2 flex h-7 items-center justify-between lg:hidden">
-    <div className="flex items-center gap-1.5">
-      <span className="flex h-6 w-6 items-center justify-center rounded-full bg-emerald-600 text-xs font-semibold text-white">
-        {user?.username?.[0]?.toUpperCase() ?? "E"}
-      </span>
-      <span className="text-sm font-semibold text-slate-900">EdgeEver</span>
-    </div>
-    <div className="flex items-center gap-1">
-      <button
-        className="flex h-7 w-7 items-center justify-center rounded-full text-slate-600 hover:bg-slate-100 hover:text-slate-900 disabled:opacity-50"
-        type="button"
-        title="立即同步"
-        disabled={!isOnline || isSyncingQueuedChanges}
-        onClick={onSyncQueuedChanges}
-      >
-        <RefreshCw className={cn("h-4 w-4", isSyncingQueuedChanges && "animate-spin")} />
-      </button>
-    </div>
-  </div>
-);
-
 export const MemoListPane = ({
-  user,
   notebooks,
   notebook,
   memos,
@@ -229,8 +195,6 @@ export const MemoListPane = ({
   search,
   searchFocusToken,
   mobileSearchActive,
-  isOnline,
-  isSyncingQueuedChanges,
   onOpenMemo,
   onDeleteMemo,
   onRestoreMemo,
@@ -253,7 +217,6 @@ export const MemoListPane = ({
   onOpenTrash,
   onOpenSettings,
   onCreateMemo,
-  onSyncQueuedChanges,
   mobileListActionsOpen,
   setMobileListActionsOpen,
   mobileMoveOpen,
@@ -271,7 +234,6 @@ export const MemoListPane = ({
 }: {
   isLoading: boolean;
   multiSelectKeyDown: boolean;
-  user: AuthUser | null;
   notebooks: Notebook[];
   notebook: Notebook | null;
   memos: MemoSummary[];
@@ -288,8 +250,6 @@ export const MemoListPane = ({
   search: string;
   searchFocusToken: number;
   mobileSearchActive: boolean;
-  isOnline: boolean;
-  isSyncingQueuedChanges: boolean;
   onOpenMemo: (memoId: string) => void;
   onDeleteMemo: (memoId: string) => void;
   onRestoreMemo: (memoId: string) => void;
@@ -312,7 +272,6 @@ export const MemoListPane = ({
   onOpenTrash: () => void;
   onOpenSettings: () => void;
   onCreateMemo: () => void;
-  onSyncQueuedChanges: () => void;
   mobileListActionsOpen: boolean;
   setMobileListActionsOpen: (open: boolean) => void;
   mobileMoveOpen: boolean;
@@ -831,14 +790,7 @@ export const MemoListPane = ({
               取消
             </button>
           </div>
-        ) : (
-          <MobileHomeHeader
-            isOnline={isOnline}
-            isSyncingQueuedChanges={isSyncingQueuedChanges}
-            user={user}
-            onSyncQueuedChanges={onSyncQueuedChanges}
-          />
-        )}
+        ) : null}
 
         {!mobileSearchActive && (
           <div className="mb-3 flex items-center justify-between gap-3 lg:hidden">
