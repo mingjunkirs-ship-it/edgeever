@@ -69,6 +69,43 @@ const SidebarNavButton = ({
   </button>
 );
 
+const SidebarTrashNavButton = ({
+  active = false,
+  onOpenTrash,
+  onEmptyTrash,
+}: {
+  active?: boolean;
+  onOpenTrash: () => void;
+  onEmptyTrash: () => void;
+}) => (
+  <div className="group relative">
+    <button
+      className={cn(
+        "flex h-9 w-full items-center gap-3 rounded-md px-3 pr-16 text-left text-sm font-medium leading-none transition-all duration-200",
+        active ? "bg-slate-100 text-slate-950" : "text-slate-700 hover:bg-slate-50 hover:text-slate-950"
+      )}
+      type="button"
+      aria-current={active ? "page" : undefined}
+      onClick={onOpenTrash}
+    >
+      <span className="flex h-4 w-4 shrink-0 items-center justify-center">
+        <Trash2 className="h-4 w-4" />
+      </span>
+      <span className="min-w-0 flex-1 truncate">回收站</span>
+    </button>
+    <button
+      className="pointer-events-none absolute right-1.5 top-1/2 flex h-7 -translate-y-1/2 items-center gap-1 rounded-md px-2 text-xs font-medium text-rose-700 opacity-0 transition-all duration-200 hover:bg-rose-50 focus-visible:pointer-events-auto focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rose-400/70 group-hover:pointer-events-auto group-hover:opacity-100 group-focus-within:pointer-events-auto group-focus-within:opacity-100"
+      type="button"
+      title="清空回收站"
+      aria-label="清空回收站"
+      onClick={onEmptyTrash}
+    >
+      <Trash2 className="h-3.5 w-3.5" />
+      清空
+    </button>
+  </div>
+);
+
 const SidebarSectionLabel = ({ icon, label }: { icon: ReactNode; label: string }) => (
   <div className="flex h-9 items-center gap-3 px-3 text-sm font-medium leading-none text-slate-600">
     <span className="flex h-4 w-4 shrink-0 items-center justify-center">{icon}</span>
@@ -163,6 +200,7 @@ export const NotebookPane = ({
   onOpenTags,
   onOpenAssets,
   onOpenTrash,
+  onEmptyTrash,
   onOpenSettings,
   onCreateMemo,
   canCreateMemo,
@@ -190,6 +228,7 @@ export const NotebookPane = ({
   onOpenTags: () => void;
   onOpenAssets: () => void;
   onOpenTrash: () => void;
+  onEmptyTrash: () => void;
   onOpenSettings: () => void;
   onCreateMemo: () => void;
   canCreateMemo: boolean;
@@ -411,20 +450,15 @@ export const NotebookPane = ({
         <nav className="space-y-1 border-t border-slate-100 pt-3" aria-label="辅助入口">
           <SidebarNavButton icon={<Tags className="h-4 w-4" />} label="标签" onClick={onOpenTags} />
           <SidebarNavButton icon={<Archive className="h-4 w-4" />} label="附件" onClick={onOpenAssets} />
-          <SidebarNavButton
-            active={view === "trash"}
-            icon={<Trash2 className="h-4 w-4" />}
-            label="回收站"
-            onClick={onOpenTrash}
-          />
+          <SidebarTrashNavButton active={view === "trash"} onOpenTrash={onOpenTrash} onEmptyTrash={onEmptyTrash} />
         </nav>
       </div>
 
-      <footer className="border-t border-slate-200 bg-white/80 px-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] pt-3 backdrop-blur-sm">
+      <footer className="border-t border-slate-200 bg-white/80 px-3 pb-[max(0.5rem,env(safe-area-inset-bottom))] pt-2 backdrop-blur-sm">
         <div>
           <button
             onClick={onOpenSettings}
-            className="flex h-9 w-full items-center gap-3 rounded-md px-3 text-left text-sm font-medium leading-none text-slate-700 transition-colors duration-200 hover:bg-slate-50 hover:text-slate-950 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-400/70"
+            className="flex h-8 w-full items-center gap-3 rounded-md px-3 text-left text-sm font-medium leading-none text-slate-700 transition-colors duration-200 hover:bg-slate-50 hover:text-slate-950 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-400/70"
             type="button"
             title="个人中心"
             aria-label="个人中心"

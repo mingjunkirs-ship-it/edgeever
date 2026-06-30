@@ -1329,10 +1329,6 @@ export const WorkspaceApp = ({
   };
 
   const handleEmptyTrash = () => {
-    if (memoView !== "trash") {
-      return;
-    }
-
     setEmptyTrashConfirmationOpen(true);
   };
 
@@ -1847,6 +1843,7 @@ export const WorkspaceApp = ({
                     setSelectedMemoId(null);
                     setActivePane("memos");
                   }}
+                  onEmptyTrash={handleEmptyTrash}
                 />
               </Suspense>
             )}
