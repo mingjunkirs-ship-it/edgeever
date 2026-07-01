@@ -10,6 +10,23 @@
 
 严禁创建新的 Git 分支；所有修改、提交和推送都必须直接在 `main` 分支上完成。
 
+## Cloudflare 自动部署约束
+
+当用户要求“根据 GitHub 项目链接把本项目安装部署到 Cloudflare”时，应优先按 `docs/agent-deploy-cloudflare.md` 执行。
+
+推荐流程：
+
+```sh
+bun install
+EDGE_EVER_PASSWORD='<首次登录密码>' bun run deploy:setup
+bun run deploy:doctor
+bun run deploy
+```
+
+如果用户没有提供首次登录密码，应只询问这一个必要信息，或在用户同意后生成随机密码。Cloudflare 授权、账号、D1/R2 资源、Worker 名称、自定义域名等私有配置必须来自用户环境、Cloudflare MCP/插件、Wrangler 登录态或 `.env.local`，严禁硬编码到仓库文件。
+
+部署脚本必须通过 `scripts/run-wrangler.mjs` 读取 `.env.local` 并生成临时 Wrangler 配置。不要直接修改 `wrangler.toml` 来写入个人 `database_id`、bucket 名称、Worker 名称或 route。
+
 ## 本地启动约束
 
 本地预览或调试时，必须优先使用 `bun run dev` 启动完整开发环境，让 API 通过 `scripts/run-wrangler.mjs` 读取 `.env.local` 中的个性化实例配置。实例名称、D1/R2 资源、账号等本机私有配置均以 `.env.local` 为准，严禁在代理指令或代码中硬编码个人实例名。

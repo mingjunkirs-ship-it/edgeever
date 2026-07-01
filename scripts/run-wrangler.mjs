@@ -51,6 +51,11 @@ const generatedConfigPath = resolve(
     ? `.wrangler.generated.${instanceKey.toLowerCase()}.toml`
     : ".wrangler.generated.toml",
 );
+const generatedSecretsPath = resolve(
+  instanceKey
+    ? `.env.wrangler.generated.${instanceKey.toLowerCase()}.secrets`
+    : ".env.wrangler.generated.secrets",
+);
 let config = readFileSync(baseConfigPath, "utf8");
 let changed = false;
 
@@ -164,6 +169,16 @@ if (changed) {
   writeFileSync(generatedConfigPath, config);
 }
 
+const isDeployCommand = wranglerArgs.includes("deploy");
+const hasSecretsFileArg = wranglerArgs.some((arg) => arg === "--secrets-file" || arg.startsWith("--secrets-file="));
+const authPasswordHash = envValue("AUTH_PASSWORD_HASH");
+const finalWranglerArgs = [...wranglerArgs];
+
+if (isDeployCommand && authPasswordHash && !hasSecretsFileArg) {
+  writeFileSync(generatedSecretsPath, `EDGE_EVER_AUTH_PASSWORD_HASH=${authPasswordHash}\n`);
+  finalWranglerArgs.push("--secrets-file", generatedSecretsPath);
+}
+
 const localWrangler = resolve(
   "node_modules",
   ".bin",
@@ -174,7 +189,7 @@ const executable = existsSync(localWrangler)
   : process.platform === "win32"
     ? "wrangler.cmd"
     : "wrangler";
-const result = spawnSync(executable, ["--config", configPath, ...wranglerArgs], {
+const result = spawnSync(executable, ["--config", configPath, ...finalWranglerArgs], {
   stdio: "inherit",
   shell: process.platform === "win32",
 });

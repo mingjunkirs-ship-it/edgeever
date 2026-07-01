@@ -6,12 +6,6 @@
 
 EdgeEver 是一个开源、自托管、Cloudflare-native 的现代笔记工作区。它保留经典印象笔记的三栏体验，同时提供清晰的数据模型、REST API、OpenAPI schema 和 MCP endpoint。
 
-<p align="center">
-  <a href="https://deploy.workers.cloudflare.com/?url=https://github.com/msh01/edgeever">
-    <img src="https://deploy.workers.cloudflare.com/button" alt="Deploy to Cloudflare" />
-  </a>
-</p>
-
 ## 在线演示
 
 - Demo 地址：[https://demo.edgeever.org](https://demo.edgeever.org)
@@ -75,19 +69,36 @@ bun run build
 
 ## 部署
 
-最简单的方式是点击上方 **Deploy to Cloudflare** 按钮，根据 Cloudflare 向导完成授权和部署。
+### AI Agent 一句话部署
+
+如果你使用 Codex、Claude Code、Antigravity 等 AI Agent，并且已经登录 Cloudflare 或安装了 Cloudflare 相关插件，可以直接把下面这句话发给 Agent：
+
+```text
+这个是 GitHub 上的项目链接：https://github.com/msh01/edgeever。请把这个项目安装部署到 Cloudflare 上。
+```
+
+Agent 应优先按 [AI Agent Cloudflare Deployment](docs/agent-deploy-cloudflare.md) 执行，只在需要 Cloudflare 授权、首次登录密码或自定义域名时询问你。
+
+### 手动部署
 
 如果使用 CLI 部署：
 
 ```sh
 cp .env.local.example .env.local
+bun install
 bunx wrangler d1 create edgeever
 bunx wrangler r2 bucket create edgeever-resources
 bun run auth:hash -- <你的密码>
 bun run deploy
 ```
 
-把 D1 创建命令返回的 `database_id` 和密码 hash 填入本机 `.env.local`。
+把 D1 创建命令返回的 `database_id` 和密码 hash 填入本机 `.env.local`。也可以使用自动化辅助命令：
+
+```sh
+EDGE_EVER_PASSWORD='<你的密码>' bun run deploy:setup
+bun run deploy:doctor
+bun run deploy
+```
 
 ## 目录结构
 

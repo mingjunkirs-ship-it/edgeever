@@ -23,6 +23,8 @@
     "cli": "bun scripts/edgeever.mjs",
     "import:evernote": "bun scripts/import-evernote-enex-via-mcp.mjs",
     "mcp:stdio": "bun scripts/edgeever-mcp-stdio.mjs",
+    "deploy:doctor": "bun scripts/cloudflare-deploy.mjs doctor",
+    "deploy:setup": "bun scripts/cloudflare-deploy.mjs setup",
     "deploy": "bun run build && bun run db:migrate:remote && bun scripts/run-wrangler.mjs deploy"
   },
   "cloudflare": {
