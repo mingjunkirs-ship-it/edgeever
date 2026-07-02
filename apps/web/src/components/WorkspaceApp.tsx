@@ -604,7 +604,9 @@ export const WorkspaceApp = ({
 
   const notebooks = notebooksQuery.data?.notebooks ?? [];
   const defaultMemoNotebookId =
-    notebooks.find((notebook) => notebook.slug === "inbox")?.id ?? selectedNotebookId ?? notebooks[0]?.id ?? null;
+    notebooks.find(
+      (notebook) => notebook.id === "nb_inbox" || notebook.slug === "inbox" || notebook.name === "等待分类"
+    )?.id ?? null;
   const canCreateMemo = Boolean(defaultMemoNotebookId && memoView !== "trash");
   const memoSelectionModeActive = memoSelectionMode || selectedMemoIds.size > 0;
   const mobileSearchActive = mobileBottomNavActive === "search";

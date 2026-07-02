@@ -616,7 +616,7 @@ app.delete("/api/v1/notebooks/:id", async (c) => {
     return notFound(c, "Notebook not found");
   }
 
-  if (id === "nb_inbox") {
+  if (id === "nb_inbox" || current.slug === "inbox") {
     return badRequest(c, "等待分类不能删除。");
   }
 
