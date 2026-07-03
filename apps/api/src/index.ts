@@ -81,6 +81,7 @@ type MemoSummaryRow = {
   notebook_id: string;
   title: string | null;
   excerpt: string;
+  content_text?: string | null;
   tags_json: string;
   is_pinned: number;
   is_archived: number;
@@ -801,7 +802,8 @@ app.get("/api/v1/memos", async (c) => {
              GROUP BY memo_id
            )
            SELECT m.id, m.notebook_id, m.title, m.excerpt, m.tags_json, m.is_pinned,
-                  m.is_archived, m.is_deleted, m.created_at, m.updated_at, m.deleted_at, mc.revision
+                  m.is_archived, m.is_deleted, m.created_at, m.updated_at, m.deleted_at, mc.revision,
+                  mc.content_text
            FROM search_matches s
            INNER JOIN memos m ON m.id = s.memo_id
            INNER JOIN memo_contents mc ON mc.memo_id = m.id
@@ -853,7 +855,8 @@ app.get("/api/v1/memos", async (c) => {
     const [rows, totalRow] = await Promise.all([
       c.env.DB.prepare(
         `SELECT m.id, m.notebook_id, m.title, m.excerpt, m.tags_json, m.is_pinned,
-                m.is_archived, m.is_deleted, m.created_at, m.updated_at, m.deleted_at, mc.revision
+                m.is_archived, m.is_deleted, m.created_at, m.updated_at, m.deleted_at, mc.revision,
+                mc.content_text
          FROM memos m
          INNER JOIN memo_contents mc ON mc.memo_id = m.id
          WHERE ${searchCursorConditions.join(" AND ")}
@@ -881,7 +884,8 @@ app.get("/api/v1/memos", async (c) => {
   const [rows, totalRow] = await Promise.all([
     c.env.DB.prepare(
       `SELECT m.id, m.notebook_id, m.title, m.excerpt, m.tags_json, m.is_pinned,
-              m.is_archived, m.is_deleted, m.created_at, m.updated_at, m.deleted_at, mc.revision
+              m.is_archived, m.is_deleted, m.created_at, m.updated_at, m.deleted_at, mc.revision,
+              mc.content_text
        FROM memos m
        INNER JOIN memo_contents mc ON mc.memo_id = m.id
        WHERE ${cursorConditions.join(" AND ")}
@@ -2710,7 +2714,7 @@ const mapMemoSummary = (row: MemoSummaryRow): MemoSummary => ({
   id: row.id,
   notebookId: row.notebook_id,
   title: row.title,
-  excerpt: row.excerpt,
+  excerpt: row.excerpt || createExcerpt(row.content_text ?? ""),
   tags: parseJsonArray(row.tags_json),
   isPinned: Boolean(row.is_pinned),
   isArchived: Boolean(row.is_archived),
@@ -2949,7 +2953,8 @@ const searchMemoSummaries = async (
              GROUP BY memo_id
            )
            SELECT m.id, m.notebook_id, m.title, m.excerpt, m.tags_json, m.is_pinned,
-                  m.is_archived, m.is_deleted, m.created_at, m.updated_at, m.deleted_at, c.revision
+                  m.is_archived, m.is_deleted, m.created_at, m.updated_at, m.deleted_at, c.revision,
+                  c.content_text
            FROM search_matches s
            INNER JOIN memos m ON m.id = s.memo_id
            INNER JOIN memo_contents c ON c.memo_id = m.id
@@ -2968,7 +2973,8 @@ const searchMemoSummaries = async (
   const rows = await db
     .prepare(
       `SELECT m.id, m.notebook_id, m.title, m.excerpt, m.tags_json, m.is_pinned,
-              m.is_archived, m.is_deleted, m.created_at, m.updated_at, m.deleted_at, c.revision
+              m.is_archived, m.is_deleted, m.created_at, m.updated_at, m.deleted_at, c.revision,
+              c.content_text
        FROM memos m
        INNER JOIN memo_contents c ON c.memo_id = m.id
        WHERE m.is_deleted = 0
@@ -3021,7 +3027,8 @@ const listMemosForMcp = async (
   const rows = await db
     .prepare(
       `SELECT m.id, m.notebook_id, m.title, m.excerpt, m.tags_json, m.is_pinned,
-              m.is_archived, m.is_deleted, m.created_at, m.updated_at, m.deleted_at, c.revision
+              m.is_archived, m.is_deleted, m.created_at, m.updated_at, m.deleted_at, c.revision,
+              c.content_text
        FROM memos m
        INNER JOIN memo_contents c ON c.memo_id = m.id
        WHERE m.is_deleted = 0
@@ -3750,6 +3757,7 @@ const updateMemoRecord = async (
     notebookId?: string;
     title?: string;
     isPinned?: boolean;
+    contentJson?: TiptapDoc;
     contentMarkdown?: string;
     tags?: string[];
     createdAt?: string;
@@ -3772,6 +3780,7 @@ const updateMemoRecord = async (
   const hasContentUpdate =
     input.notebookId !== undefined ||
     input.title !== undefined ||
+    input.contentJson !== undefined ||
     input.contentMarkdown !== undefined ||
     input.tags !== undefined ||
     input.createdAt !== undefined ||
@@ -3811,7 +3820,12 @@ const updateMemoRecord = async (
   }
 
   const currentContentJson = parseDoc(current.content_json);
-  const contentJson = input.contentMarkdown !== undefined ? markdownToDoc(input.contentMarkdown) : currentContentJson;
+  const contentJson =
+    input.contentJson !== undefined
+      ? input.contentJson
+      : input.contentMarkdown !== undefined
+        ? markdownToDoc(input.contentMarkdown)
+        : currentContentJson;
   const contentMarkdown =
     input.contentMarkdown !== undefined ? input.contentMarkdown : docToMarkdown(contentJson);
   const contentText = docToText(contentJson);

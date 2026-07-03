@@ -125,6 +125,15 @@ const PaneLoadingFallback = ({ label = "Loading" }: { label?: string }) => (
 
 const memoDetailQueryKey = (memoId: string, view: MemoView) => ["memo", memoId, view] as const;
 
+type MemoListQueryData = {
+  pages: Array<{
+    memos: MemoSummary[];
+    totalCount: number;
+    nextCursor: string | null;
+  }>;
+  pageParams: unknown[];
+};
+
 const memoToSummary = (memo: MemoDetail): MemoSummary => ({
   id: memo.id,
   notebookId: memo.notebookId,
@@ -142,6 +151,34 @@ const memoToSummary = (memo: MemoDetail): MemoSummary => ({
 
 const cacheMemoDetail = (queryClient: QueryClient, memo: MemoDetail, view: MemoView = memo.isDeleted ? "trash" : "notebook") => {
   queryClient.setQueryData(memoDetailQueryKey(memo.id, view), { memo });
+};
+
+const updateMemoSummaryInLists = (queryClient: QueryClient, memo: MemoDetail) => {
+  const summary = memoToSummary(memo);
+
+  queryClient.setQueriesData<MemoListQueryData>({ queryKey: ["memos"] }, (current) => {
+    if (!current) {
+      return current;
+    }
+
+    let changed = false;
+    const pages = current.pages.map((page) => {
+      let pageChanged = false;
+      const memos = page.memos.map((item) => {
+        if (item.id !== summary.id) {
+          return item;
+        }
+
+        changed = true;
+        pageChanged = true;
+        return { ...item, ...summary };
+      });
+
+      return pageChanged ? { ...page, memos } : page;
+    });
+
+    return changed ? { ...current, pages } : current;
+  });
 };
 
 const createPendingMemoDetail = (notebookId: string, template?: MemoTemplate): MemoDetail => {
@@ -2326,6 +2363,7 @@ export const WorkspaceApp = ({
                     }}
                     onSaved={async (memo) => {
                       cacheMemoDetail(queryClient, memo, memoView);
+                      updateMemoSummaryInLists(queryClient, memo);
                       await Promise.all([
                         queryClient.invalidateQueries({ queryKey: ["memos"] }),
                         queryClient.invalidateQueries({ queryKey: ["notebooks"] }),
