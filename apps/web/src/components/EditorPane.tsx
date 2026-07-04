@@ -74,8 +74,40 @@ type NoteSearchMatch = {
   to: number;
 };
 
+type MobileImeDebugEntry = {
+  id: number;
+  event: string;
+  activeElement: string;
+  inputType?: string;
+  isComposing?: boolean;
+  key?: string;
+  valueLength: number;
+  time: string;
+};
+
 const isEditorReady = (editor: Editor | null | undefined): editor is Editor =>
   Boolean(editor && !editor.isDestroyed && (editor as { extensionManager?: unknown }).extensionManager);
+
+const getActiveElementLabel = () => {
+  if (typeof document === "undefined") {
+    return "document unavailable";
+  }
+
+  const element = document.activeElement;
+  if (!element) {
+    return "none";
+  }
+
+  const tag = element.tagName.toLowerCase();
+  const id = element.id ? `#${element.id}` : "";
+  const className =
+    element instanceof HTMLElement && element.className
+      ? `.${String(element.className).trim().split(/\s+/).slice(0, 2).join(".")}`
+      : "";
+  const role = element.getAttribute("role");
+
+  return `${tag}${id}${className}${role ? `[role=${role}]` : ""}`;
+};
 
 const getEditorSearchMatches = (editor: Editor | null, query: string): NoteSearchMatch[] => {
   const needle = query.trim().toLocaleLowerCase();
@@ -426,6 +458,9 @@ export const EditorPane = ({
   const [isMobileEditing, setIsMobileEditing] = useState(false);
   const [mobilePlainText, setMobilePlainText] = useState("");
   const [mobileToolbarOpen, setMobileToolbarOpen] = useState(false);
+  const [mobileImeDebugOpen, setMobileImeDebugOpen] = useState(true);
+  const [mobileImeDebugActiveElement, setMobileImeDebugActiveElement] = useState(getActiveElementLabel);
+  const [mobileImeDebugEvents, setMobileImeDebugEvents] = useState<MobileImeDebugEntry[]>([]);
   const notebookOptions = useMemo(() => getNotebookMoveOptions(notebooks), [notebooks]);
   const readOnly = isTrashView || Boolean(memo?.isDeleted);
   const effectiveReadOnly = readOnly || (isMobileViewport && !isMobileEditing);
@@ -436,6 +471,7 @@ export const EditorPane = ({
   const mobileTextAreaRef = useRef<HTMLTextAreaElement | null>(null);
   const mobileDraftTimerRef = useRef<number | null>(null);
   const mobileSaveTimerRef = useRef<number | null>(null);
+  const mobileImeDebugEventIdRef = useRef(0);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const noteSearchInputRef = useRef<HTMLInputElement | null>(null);
   const noteReplaceInputRef = useRef<HTMLInputElement | null>(null);
@@ -795,6 +831,46 @@ export const EditorPane = ({
     () => mobileTextAreaRef.current?.value ?? mobilePlainText,
     [mobilePlainText]
   );
+
+  const recordMobileImeDebugEvent = useCallback((eventName: string, event?: unknown) => {
+    const textarea = mobileTextAreaRef.current;
+    const nativeEvent = event && typeof event === "object" && "nativeEvent" in event
+      ? (event as { nativeEvent?: unknown }).nativeEvent
+      : event;
+    const inputEvent = nativeEvent as Partial<InputEvent> | undefined;
+    const keyboardEvent = nativeEvent as Partial<KeyboardEvent> | undefined;
+
+    mobileImeDebugEventIdRef.current += 1;
+    setMobileImeDebugActiveElement(getActiveElementLabel());
+    setMobileImeDebugEvents((current) =>
+      [
+        {
+          id: mobileImeDebugEventIdRef.current,
+          event: eventName,
+          activeElement: getActiveElementLabel(),
+          inputType: typeof inputEvent?.inputType === "string" ? inputEvent.inputType : undefined,
+          isComposing: typeof inputEvent?.isComposing === "boolean" ? inputEvent.isComposing : undefined,
+          key: typeof keyboardEvent?.key === "string" ? keyboardEvent.key : undefined,
+          valueLength: textarea?.value.length ?? 0,
+          time: new Date().toLocaleTimeString("zh-CN", { hour12: false }),
+        },
+        ...current,
+      ].slice(0, 20)
+    );
+  }, []);
+
+  useEffect(() => {
+    if (!useMobilePlainTextEditor) {
+      return;
+    }
+
+    recordMobileImeDebugEvent("mount-mobile-textarea");
+    const timer = window.setInterval(() => {
+      setMobileImeDebugActiveElement(getActiveElementLabel());
+    }, 800);
+
+    return () => window.clearInterval(timer);
+  }, [recordMobileImeDebugEvent, useMobilePlainTextEditor]);
 
   const persistCurrentDraft = useCallback(
     (nextTitle = title, nextTagsText = tagsText, nextMobilePlainText = getMobilePlainTextValue()) => {
@@ -1268,6 +1344,24 @@ export const EditorPane = ({
   const noteSearchMatchLabel = noteSearchQuery.trim()
     ? `${noteSearchMatches.length > 0 ? noteSearchIndex + 1 : 0}/${noteSearchMatches.length}`
     : "0/0";
+  const mobileImeDebugTextareaFocused =
+    typeof document !== "undefined" && mobileTextAreaRef.current === document.activeElement;
+  const mobileImeDebugLogText = [
+    `memoId=${memo.id}`,
+    `mobile=${isMobileViewport}`,
+    `editing=${isMobileEditing}`,
+    `plainTextEditor=${useMobilePlainTextEditor}`,
+    `textareaFocused=${mobileImeDebugTextareaFocused}`,
+    `activeElement=${mobileImeDebugActiveElement}`,
+    `valueLength=${getMobilePlainTextValue().length}`,
+    `saveState=${saveState}`,
+    ...mobileImeDebugEvents.map((entry) =>
+      `${entry.time} ${entry.event} active=${entry.activeElement} len=${entry.valueLength}` +
+      `${entry.inputType ? ` inputType=${entry.inputType}` : ""}` +
+      `${entry.isComposing !== undefined ? ` composing=${entry.isComposing}` : ""}` +
+      `${entry.key ? ` key=${entry.key}` : ""}`
+    ),
+  ].join("\n");
 
   const updateMemoNotebook = (notebookId: string, sourceMemo: MemoDetail = memoRef.current ?? memo) => {
     if (effectiveReadOnly || notebookId === sourceMemo.notebookId || notebookUpdatePending) {
@@ -1715,7 +1809,17 @@ export const EditorPane = ({
           <textarea
             ref={mobileTextAreaRef}
             defaultValue={mobilePlainText}
-            onInput={markMobilePlainTextDirty}
+            onFocus={(event) => recordMobileImeDebugEvent("focus", event)}
+            onBlur={(event) => recordMobileImeDebugEvent("blur", event)}
+            onClick={(event) => recordMobileImeDebugEvent("click", event)}
+            onKeyDown={(event) => recordMobileImeDebugEvent("keydown", event)}
+            onBeforeInput={(event) => recordMobileImeDebugEvent("beforeinput", event)}
+            onCompositionStart={(event) => recordMobileImeDebugEvent("compositionstart", event)}
+            onCompositionEnd={(event) => recordMobileImeDebugEvent("compositionend", event)}
+            onInput={(event) => {
+              recordMobileImeDebugEvent("input", event);
+              markMobilePlainTextDirty();
+            }}
             className="block min-h-full w-full resize-none border-0 bg-white px-4 py-3 text-base leading-7 text-slate-900 outline-none placeholder:text-slate-400 sm:px-7"
             placeholder="开始记录..."
           />
@@ -1723,6 +1827,62 @@ export const EditorPane = ({
           <EditorContent editor={editor} />
         )}
       </div>
+
+      {useMobilePlainTextEditor && (
+        <div className="fixed left-2 right-2 top-[max(3.5rem,env(safe-area-inset-top))] z-[70] rounded-md border border-amber-200 bg-amber-50/95 p-2 text-[11px] text-slate-800 shadow-lg backdrop-blur sm:hidden">
+          <div className="flex items-center justify-between gap-2">
+            <button
+              className="min-w-0 flex-1 truncate text-left font-semibold"
+              type="button"
+              onClick={() => setMobileImeDebugOpen((open) => !open)}
+            >
+              IME 诊断：{mobileImeDebugTextareaFocused ? "正文已聚焦" : "正文未聚焦"} · len {getMobilePlainTextValue().length}
+            </button>
+            <button
+              className="rounded border border-amber-300 bg-white px-2 py-1 font-medium text-slate-700"
+              type="button"
+              onClick={() => {
+                mobileTextAreaRef.current?.focus({ preventScroll: true });
+                recordMobileImeDebugEvent("debug-focus-button");
+              }}
+            >
+              聚焦
+            </button>
+            <button
+              className="rounded border border-amber-300 bg-white px-2 py-1 font-medium text-slate-700"
+              type="button"
+              onClick={() => {
+                void navigator.clipboard?.writeText(mobileImeDebugLogText);
+                recordMobileImeDebugEvent("debug-copy-log");
+              }}
+            >
+              复制
+            </button>
+          </div>
+          {mobileImeDebugOpen && (
+            <div className="mt-2 max-h-40 overflow-auto rounded border border-amber-200 bg-white/80 p-2 font-mono leading-5">
+              <div>active: {mobileImeDebugActiveElement}</div>
+              <div>textareaFocused: {String(mobileImeDebugTextareaFocused)}</div>
+              <div>mode: mobile={String(isMobileViewport)} editing={String(isMobileEditing)} plain={String(useMobilePlainTextEditor)}</div>
+              <div>save: {saveState} dirty={String(hasUnsavedChanges)}</div>
+              <div className="mt-1 border-t border-amber-100 pt-1">
+                {mobileImeDebugEvents.length === 0 ? (
+                  <div>暂无事件。点正文或按键后这里应该变化。</div>
+                ) : (
+                  mobileImeDebugEvents.map((entry) => (
+                    <div key={entry.id}>
+                      {entry.time} {entry.event} len={entry.valueLength}
+                      {entry.inputType ? ` type=${entry.inputType}` : ""}
+                      {entry.isComposing !== undefined ? ` comp=${entry.isComposing}` : ""}
+                      {entry.key ? ` key=${entry.key}` : ""}
+                    </div>
+                  ))
+                )}
+              </div>
+            </div>
+          )}
+        </div>
+      )}
 
       {isMobileViewport && !isMobileEditing && !readOnly && (
         <Button
