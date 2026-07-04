@@ -1469,6 +1469,7 @@ export const EditorPane = ({
     setMobilePlainText(nextValue);
     setMobilePlainTextElementValue(mobileTextAreaRef.current, nextValue);
     markMobilePlainTextDirty();
+    recordMobileImeDebugEvent("prompt-input");
     window.requestAnimationFrame(() => focusMobileInputTarget());
   };
 
@@ -1921,26 +1922,35 @@ export const EditorPane = ({
         {(!isMobileViewport || (mobileToolbarOpen && !useMobilePlainTextEditor)) && <EditorToolbar editor={editor} readOnly={effectiveReadOnly} />}
       </header>
 
-      <div className="edgeever-editor min-h-0 flex-1 overflow-y-auto bg-white">
+      <div className="edgeever-editor relative min-h-0 flex-1 overflow-y-auto bg-white">
         {useMobilePlainTextEditor ? (
-          <textarea
-            ref={(element) => {
-              mobileTextAreaRef.current = element;
-            }}
-            defaultValue={mobilePlainText}
-            autoCapitalize="sentences"
-            autoComplete="on"
-            autoCorrect="on"
-            enterKeyHint="enter"
-            inputMode="text"
-            name="memo-body"
-            spellCheck
-            data-edgeever-mobile-editor="plain-textarea"
-            aria-label="笔记正文"
-            className="block min-h-full w-full resize-none border-0 bg-white px-4 py-3 text-base leading-7 text-slate-900 outline-none placeholder:text-slate-400 sm:px-7"
-            placeholder="开始记录..."
-            style={{ WebkitUserSelect: "text", userSelect: "text", caretColor: "auto" }}
-          />
+          <>
+            <textarea
+              ref={(element) => {
+                mobileTextAreaRef.current = element;
+              }}
+              defaultValue={mobilePlainText}
+              autoCapitalize="sentences"
+              autoComplete="on"
+              autoCorrect="on"
+              enterKeyHint="enter"
+              inputMode="text"
+              name="memo-body"
+              spellCheck
+              data-edgeever-mobile-editor="plain-textarea"
+              aria-label="笔记正文"
+              className="block min-h-full w-full resize-none border-0 bg-white px-4 py-3 pr-28 text-base leading-7 text-slate-900 outline-none placeholder:text-slate-400 sm:px-7"
+              placeholder="开始记录..."
+              style={{ WebkitUserSelect: "text", userSelect: "text", caretColor: "auto" }}
+            />
+            <button
+              className="absolute right-3 top-3 rounded-full border border-emerald-200 bg-emerald-50 px-3 py-1.5 text-sm font-semibold text-emerald-800 shadow-sm"
+              type="button"
+              onClick={handleMobilePromptInput}
+            >
+              系统输入
+            </button>
+          </>
         ) : (
           <EditorContent editor={editor} />
         )}
