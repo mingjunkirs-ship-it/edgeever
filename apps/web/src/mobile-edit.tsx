@@ -4,7 +4,9 @@ import { EditorContent, useEditor } from "@tiptap/react";
 import StarterKit from "@tiptap/starter-kit";
 import Image from "@tiptap/extension-image";
 import Placeholder from "@tiptap/extension-placeholder";
+import { ImagePlus } from "lucide-react";
 import { docToMarkdown, emptyDoc, markdownToDoc, type MemoDetail, type Resource, type TiptapDoc } from "@edgeever/shared";
+import { compressImageForUpload } from "@/lib/image-compression";
 import "./styles/mobile-markdown-editor.css";
 
 const AUTO_SAVE_DELAY_MS = 1200;
@@ -28,7 +30,7 @@ type MobileDraft = {
   updatedAt: string;
 };
 
-type SaveState = "loading" | "idle" | "dirty" | "saving" | "saved" | "uploading" | "error" | "local-draft" | "leaving";
+type SaveState = "loading" | "idle" | "dirty" | "saving" | "saved" | "compressing" | "uploading" | "error" | "local-draft" | "leaving";
 
 const getParams = () => new URLSearchParams(window.location.hash ? window.location.hash.slice(1) : window.location.search);
 
@@ -342,17 +344,19 @@ const MobileTiptapEditorApp = () => {
     }
 
     setError(null);
-    setSaveStateStable("uploading");
+    setSaveStateStable("compressing");
 
     try {
-      const { resource } = await uploadResource(currentMemo.id, file);
+      const uploadFile = (await compressImageForUpload(file)).file;
+      setSaveStateStable("uploading");
+      const { resource } = await uploadResource(currentMemo.id, uploadFile);
       editor
         .chain()
         .focus()
         .setImage({
           src: resource.url,
-          alt: resource.filename || file.name,
-          title: resource.filename || file.name,
+          alt: file.name,
+          title: file.name,
         })
         .run();
     } catch (uploadError) {
@@ -499,24 +503,26 @@ const MobileTiptapEditorApp = () => {
       ? "加载中"
       : saveState === "saving"
         ? "保存中"
-        : saveState === "uploading"
-          ? "上传中"
-          : saveState === "dirty"
-            ? "未保存"
-            : saveState === "saved"
-              ? "已保存"
-              : saveState === "local-draft"
-                ? "本地草稿"
-                : saveState === "leaving"
-                  ? "返回中"
-                  : saveState === "error"
-                    ? "保存失败"
-                    : "已保存";
+        : saveState === "compressing"
+          ? "压缩中"
+          : saveState === "uploading"
+            ? "上传中"
+            : saveState === "dirty"
+              ? "未保存"
+              : saveState === "saved"
+                ? "已保存"
+                : saveState === "local-draft"
+                  ? "本地草稿"
+                  : saveState === "leaving"
+                    ? "返回中"
+                    : saveState === "error"
+                      ? "保存失败"
+                      : "已保存";
 
   const statusClassName =
     saveState === "error"
       ? "error"
-      : saveState === "dirty" || saveState === "saving" || saveState === "uploading" || saveState === "leaving"
+      : saveState === "dirty" || saveState === "saving" || saveState === "compressing" || saveState === "uploading" || saveState === "leaving"
         ? "active"
         : "";
 
@@ -558,8 +564,14 @@ const MobileTiptapEditorApp = () => {
         />
 
         <div className="mobile-editor-tool-row">
-          <button type="button" disabled={!memo || saveState === "loading" || saveState === "uploading"} onClick={() => imageInputRef.current?.click()}>
-            图片
+          <button
+            type="button"
+            aria-label="上传图片"
+            title="上传图片"
+            disabled={!memo || saveState === "loading" || saveState === "compressing" || saveState === "uploading"}
+            onClick={() => imageInputRef.current?.click()}
+          >
+            <ImagePlus aria-hidden="true" size={18} strokeWidth={2} />
           </button>
         </div>
         <input

@@ -154,15 +154,24 @@ input {
   display: flex;
   align-items: center;
   gap: 8px;
+  min-height: 34px;
 }
 
 .mobile-editor-tool-row button {
-  border: 1px solid #cbd5e1;
-  background: #fff;
-  color: #334155;
-  font-size: 14px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid #e2e8f0;
+  background: #f8fafc;
+  color: #64748b;
   min-height: 34px;
-  padding: 6px 12px;
+  width: 34px;
+  padding: 0;
+}
+
+.mobile-editor-tool-row button:active {
+  background: #eef2f7;
+  color: #334155;
 }
 
 .edgeever-mobile-tiptap-editor {
