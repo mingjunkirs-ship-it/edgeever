@@ -1721,11 +1721,21 @@ const ResourcesModal = ({
         type: asset.mimeType || "application/octet-stream",
       } as unknown as Blob);
 
-      const response = await client.uploadMemoResource(activeMemo.id, form);
-      return response.resource;
+      const { resource } = await client.uploadMemoResource(activeMemo.id, form);
+      const nextMarkdown = appendResourceMarkdown(activeMemo.contentMarkdown || activeMemo.contentText || "", {
+        filename: resource.filename || asset.name || "upload",
+        kind: resource.kind,
+        url: resource.url,
+      });
+      const { memo } = await client.updateMemo(activeMemo.id, {
+        contentMarkdown: nextMarkdown,
+        expectedRevision: activeMemo.revision,
+      });
+
+      return { memo, resource };
     },
-    onSuccess: async (resource) => {
-      if (!resource) {
+    onSuccess: async (result) => {
+      if (!result) {
         return;
       }
 
@@ -1734,7 +1744,8 @@ const ResourcesModal = ({
         queryClient.invalidateQueries({ queryKey: ["mobile", "memo"] }),
         queryClient.invalidateQueries({ queryKey: ["mobile", "memos"] }),
       ]);
-      setFilter(resource.kind === "image" ? "image" : "all");
+      queryClient.setQueryData(["mobile", "memo", "notebook", result.memo.id], { memo: result.memo });
+      setFilter(result.resource.kind === "image" ? "image" : "all");
     },
   });
 
@@ -1834,7 +1845,9 @@ const ResourcesModal = ({
           </Pressable>
 
           <Text style={styles.assetsHint}>
-            {activeMemo ? `当前笔记：${activeMemo.title?.trim() || activeMemo.excerpt || DEFAULT_MEMO_TITLE}` : "打开一条笔记后可作为资源上传目标"}
+            {activeMemo
+              ? `当前笔记：${activeMemo.title?.trim() || activeMemo.excerpt || DEFAULT_MEMO_TITLE}；上传后会写入正文`
+              : "打开一条笔记后可作为资源上传目标"}
           </Text>
           {uploadResourceMutation.error ? (
             <Text style={styles.errorText}>{uploadResourceMutation.error instanceof Error ? uploadResourceMutation.error.message : "上传失败"}</Text>
@@ -2623,6 +2636,21 @@ const openResource = (resource: ResourceListItem) => {
   Linking.openURL(resource.url).catch(() => {
     Alert.alert("无法打开资源", "系统没有可用应用打开此链接。");
   });
+};
+
+const appendResourceMarkdown = (
+  currentMarkdown: string,
+  resource: {
+    filename: string;
+    kind: "image" | "attachment";
+    url: string;
+  }
+) => {
+  const label = resource.filename.replace(/\]/g, "\\]");
+  const markdown = resource.kind === "image" ? `![${label}](${resource.url})` : `附件：[${label}](${resource.url})`;
+  const trimmed = currentMarkdown.trimEnd();
+
+  return trimmed ? `${trimmed}\n\n${markdown}\n` : `${markdown}\n`;
 };
 
 const getTokenScopeLabel = (scope: string) => {
