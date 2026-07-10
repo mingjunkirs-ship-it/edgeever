@@ -114,7 +114,9 @@ bun run build
 ```text
 apps/web          Vite + React 前端、PWA、离线草稿与同步队列
 apps/api          Cloudflare Worker + Hono API、OpenAPI、MCP endpoint
+apps/mobile       Expo + React Native 移动端 App
 apps/site         Astro 官方网站，可独立部署
+packages/client   Web 与移动端共享的 API Client
 packages/shared   共享类型、Zod schema、TipTap / Markdown 内容转换
 scripts           Wrangler 封装、密码 hash、CLI、MCP stdio bridge、Evernote ENEX 导入
 migrations        D1 数据库迁移

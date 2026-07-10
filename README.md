@@ -110,7 +110,9 @@ bun run build
 ```text
 apps/web          Vite + React frontend, PWA, offline drafts, and sync queue
 apps/api          Cloudflare Worker + Hono API, OpenAPI, MCP endpoint
+apps/mobile       Expo + React Native mobile app
 apps/site         Astro official website, deployable independently
+packages/client   Shared API client for web and mobile apps
 packages/shared   Shared types, Zod schemas, TipTap / Markdown conversion
 scripts           Wrangler wrapper, password hash, CLI, MCP stdio bridge, Evernote ENEX import
 migrations        D1 database migrations
