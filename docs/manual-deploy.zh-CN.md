@@ -2,7 +2,7 @@
 
 如果你熟悉 Cloudflare 和命令行，或者想自定义/精细控制部署流程，可以按照以下指南进行手动部署与后续更新。
 
-> 💡 **提示**：如果是通过 AI 助手（Claude Code、Codex、Antigravity、Cursor、Trae 等）进行部署，AI 助手应优先参考 [AI Agent Cloudflare Deployment](agent-deploy-cloudflare.md) 约定。
+> 💡 **提示**：如果是通过 AI 助手（Claude Code、Codex、Antigravity、Cursor、Trae 等）进行部署，AI 助手应优先参考 [AI Agent Cloudflare Deployment](https://github.com/tianma-if/edgeever/blob/main/docs/agent-deploy-cloudflare.md) 约定。
 
 ## 部署步骤
 

@@ -2,7 +2,7 @@
 
 If you are comfortable with Cloudflare and the command line, or prefer customized control over the deployment process, follow this guide for manual deployment and future updates.
 
-> 💡 **Tip**: If you are deploying using an AI assistant (such as Claude Code, Codex, Antigravity, Cursor, or Trae), the agent should follow the [AI Agent Cloudflare Deployment](agent-deploy-cloudflare.md) runbook.
+> 💡 **Tip**: If you are deploying using an AI assistant (such as Claude Code, Codex, Antigravity, Cursor, or Trae), the agent should follow the [AI Agent Cloudflare Deployment](https://github.com/tianma-if/edgeever/blob/main/docs/agent-deploy-cloudflare.md) runbook.
 
 ## Deployment Steps
 
