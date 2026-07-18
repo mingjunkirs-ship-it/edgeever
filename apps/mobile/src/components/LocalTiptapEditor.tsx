@@ -18,6 +18,7 @@ type PickedImage = {
 export interface LocalTiptapEditorRef extends DOMImperativeFactory {
   flush: () => void;
   focus: () => void;
+  focusEnd: () => void;
   replaceAll: DOMImperativeFactory[string];
   search: DOMImperativeFactory[string];
 }
@@ -163,6 +164,7 @@ export default function LocalTiptapEditor(props: LocalTiptapEditorProps) {
     () => ({
       flush,
       focus: () => editor?.commands.focus(),
+      focusEnd: () => editor?.commands.focus("end"),
       replaceAll: (...args: Parameters<DOMImperativeFactory[string]>) => replaceAll(String(args[0] ?? ""), String(args[1] ?? "")),
       search: (...args: Parameters<DOMImperativeFactory[string]>) => search(String(args[0] ?? ""), Number(args[1] ?? 0)),
     }),

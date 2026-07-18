@@ -4589,6 +4589,7 @@ const RichEditorModal = ({
   const { resolvedTheme, toggleTheme } = useMobileTheme();
   const insets = useSafeAreaInsets();
   const editorRef = useRef<LocalTiptapEditorRef>(null);
+  const initialFocusTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const contentJsonRef = useRef<TiptapDoc>(memo?.contentJson ?? markdownToDoc(memo?.contentMarkdown ?? ""));
   const contentMarkdownRef = useRef(memo?.contentMarkdown ?? "");
   const contentSnapshotRef = useRef(JSON.stringify(contentJsonRef.current));
@@ -4629,6 +4630,10 @@ const RichEditorModal = ({
     if (!memo) {
       return;
     }
+    if (initialFocusTimerRef.current !== null) {
+      clearTimeout(initialFocusTimerRef.current);
+      initialFocusTimerRef.current = null;
+    }
     let active = true;
     setDraftLoaded(false);
     setDraftRestored(false);
@@ -4668,6 +4673,10 @@ const RichEditorModal = ({
 
     return () => {
       active = false;
+      if (initialFocusTimerRef.current !== null) {
+        clearTimeout(initialFocusTimerRef.current);
+        initialFocusTimerRef.current = null;
+      }
     };
   }, [memo?.id]);
 
@@ -4815,6 +4824,10 @@ const RichEditorModal = ({
     if (savingRef.current || uploadingRef.current) {
       return;
     }
+    if (initialFocusTimerRef.current !== null) {
+      clearTimeout(initialFocusTimerRef.current);
+      initialFocusTimerRef.current = null;
+    }
     await flushEditor();
     const savedMemo = await save();
     if (savedMemo) {
@@ -4880,6 +4893,13 @@ const RichEditorModal = ({
           setStartupMs(elapsedMs);
           setReady(true);
           recordEditorStartup(elapsedMs);
+          if (initialFocusTimerRef.current !== null) {
+            clearTimeout(initialFocusTimerRef.current);
+          }
+          initialFocusTimerRef.current = setTimeout(() => {
+            initialFocusTimerRef.current = null;
+            editorRef.current?.focusEnd();
+          }, 160);
         }}
         onSearchState={handleEditorSearchState}
         ref={editorRef}
