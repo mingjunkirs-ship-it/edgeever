@@ -78,7 +78,7 @@ import { Alert, Pressable, Text, TextInput } from "../components/LocalizedText";
 import Markdown, { type RenderRules } from "react-native-markdown-display";
 import { SvgXml } from "react-native-svg";
 import { buildRevisionDiffRows, createExcerpt, docToMarkdown, docToText, getNotebookDescendantIds, markdownToDoc, type ApiToken, type AuthUser, type MemoDetail, type MemoRevision, type MemoSummary, type Notebook, type ResourceListItem, type RevisionDiffRow, type TagSummary, type TiptapDoc } from "@edgeever/shared";
-import { MOBILE_UI_METRICS, toggleMobileMemoFilterMode } from "@edgeever/shared/mobile-ui";
+import { MOBILE_UI_METRICS, toggleMobileMemoFilterMode, toggleMobileMemoSelection } from "@edgeever/shared/mobile-ui";
 import { clearMobileMemoDraft, clearMobileNewMemoDraft, readMobileMemoDraft, readMobileNewMemoDraft, writeMobileMemoDraft, writeMobileNewMemoDraft, type MobileMemoDraft } from "../lib/mobile-drafts";
 import {
   readMobileImageCompressionEnabled,
@@ -436,17 +436,7 @@ export const WorkspaceScreen = () => {
 
   const toggleSelectedMemo = (memoId: string) => {
     setSelectionMode(true);
-    setSelectedMemoIds((current) => {
-      const next = new Set(current);
-
-      if (next.has(memoId)) {
-        next.delete(memoId);
-      } else {
-        next.add(memoId);
-      }
-
-      return next;
-    });
+    setSelectedMemoIds((current) => toggleMobileMemoSelection(current, memoId));
   };
 
   const clearSelection = () => {
@@ -1320,7 +1310,7 @@ const NotesView = ({
         ) : null}
         <View style={styles.mobileListTitleRow}>
           <Pressable
-            accessibilityLabel={memoView === "trash" ? "返回笔记列表" : "选择笔记本"}
+            accessibilityLabel={memoView === "trash" ? "返回笔记列表" : "切换笔记本"}
             accessibilityRole="button"
             onPress={memoView === "trash" ? () => onSetMemoView("notebook") : onOpenNotebookPicker}
             style={styles.mobileNotebookTitleButton}
@@ -1331,7 +1321,7 @@ const NotesView = ({
             </Text>
             {memoView === "notebook" ? <ChevronDown color="#64748b" size={16} /> : null}
           </Pressable>
-          <Pressable accessibilityLabel={selectionMode ? "批量操作" : "笔记列表操作"} accessibilityRole="button" onPress={onOpenActions} style={styles.mobileMoreButton}>
+          <Pressable accessibilityLabel={selectionMode ? "批量操作" : "列表选项"} accessibilityRole="button" onPress={onOpenActions} style={styles.mobileMoreButton}>
             <MoreHorizontal color="#475569" size={20} />
           </Pressable>
         </View>

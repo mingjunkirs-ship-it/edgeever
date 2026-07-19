@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { MOBILE_UI_METRICS, toggleMobileMemoFilterMode } from "./mobile-ui.ts";
+import { MOBILE_UI_METRICS, toggleMobileMemoFilterMode, toggleMobileMemoSelection } from "./mobile-ui.ts";
 
 describe("mobile UI contract", () => {
   test("keeps core touch targets and navigation metrics stable", () => {
@@ -12,5 +12,14 @@ describe("mobile UI contract", () => {
     expect(toggleMobileMemoFilterMode("all", "pinned")).toBe("pinned");
     expect(toggleMobileMemoFilterMode("pinned", "pinned")).toBe("all");
     expect(toggleMobileMemoFilterMode("tagged", "untagged")).toBe("untagged");
+  });
+
+  test("shares immutable memo selection behavior across mobile clients", () => {
+    const current = new Set(["memo-a"]);
+    const added = toggleMobileMemoSelection(current, "memo-b");
+
+    expect(Array.from(current)).toEqual(["memo-a"]);
+    expect(Array.from(added)).toEqual(["memo-a", "memo-b"]);
+    expect(Array.from(toggleMobileMemoSelection(added, "memo-a"))).toEqual(["memo-b"]);
   });
 });

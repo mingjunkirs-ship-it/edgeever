@@ -12,3 +12,18 @@ export const toggleMobileMemoFilterMode = (
   current: MobileMemoFilterMode,
   requested: Exclude<MobileMemoFilterMode, "all">
 ): MobileMemoFilterMode => current === requested ? "all" : requested;
+
+export const toggleMobileMemoSelection = (
+  current: ReadonlySet<string>,
+  memoId: string
+): Set<string> => {
+  const next = new Set(current);
+
+  if (next.has(memoId)) {
+    next.delete(memoId);
+  } else {
+    next.add(memoId);
+  }
+
+  return next;
+};

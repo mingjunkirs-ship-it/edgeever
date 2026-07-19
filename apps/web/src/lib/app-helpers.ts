@@ -508,18 +508,6 @@ export const getNotebookMoveOptions = (notebooks: Notebook[]) => {
   return options;
 };
 
-export const toggleMemoSelection = (current: Set<string>, memoId: string) => {
-  const next = new Set(current);
-
-  if (next.has(memoId)) {
-    next.delete(memoId);
-  } else {
-    next.add(memoId);
-  }
-
-  return next;
-};
-
 export const hasMemoDragData = (dataTransfer: DataTransfer) => Array.from(dataTransfer.types).includes(MEMO_DRAG_MIME);
 export const hasNotebookDragData = (dataTransfer: DataTransfer) => Array.from(dataTransfer.types).includes(NOTEBOOK_DRAG_MIME);
 export const hasEdgeEverDragData = (dataTransfer: DataTransfer) => hasMemoDragData(dataTransfer) || hasNotebookDragData(dataTransfer);
