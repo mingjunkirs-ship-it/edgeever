@@ -289,15 +289,6 @@ const DEMO_SEED_NOTEBOOKS = [
 ];
 const DEMO_SEED_MEMOS_ZH = [
   {
-    id: "memo_welcome",
-    notebookId: "nb_inbox",
-    title: "欢迎来到 EdgeEver",
-    tags: ["edgeever", "welcome"],
-    isPinned: true,
-    markdown:
-      "## 欢迎来到 EdgeEver\n\n这是公开演示环境，可以放心创建、编辑、搜索和合并笔记。\n\n> 演示数据会在**每周一凌晨 1:00（北京时间）**重置并恢复，请不要保存私密内容。\n\n### 🧭 快速体验\n\n- 🎯 **产品全景指南**：打开左侧的 `🌟 EdgeEver 核心特性全景指南`，一览产品特性、可视化表格、代码高亮、Mermaid 图表与 AI (MCP) 原生接入。\n- 📝 **自由编辑**：您可以随意创建、修改或删除笔记，体验所见即所得与 Markdown 源码模式无缝切换。\n\n欢迎探索 EdgeEver 的全套功能！",
-  },
-  {
     id: "memo_demo_overview",
     notebookId: "nb_demo_features",
     title: "🌟 EdgeEver 核心特性全景指南",
@@ -326,11 +317,6 @@ const DEMO_SEED_REVISIONS = [
   },
 ];
 const DEMO_MEMO_ENGLISH = {
-  memo_welcome: {
-    title: "Welcome to EdgeEver",
-    markdown:
-      "## Welcome to EdgeEver\n\nThis public demo is safe for exploring, editing, searching, and merging notes. Demo data resets every Monday at 1:00 AM China Standard Time.\n\n### Quick Tour\n\n- 🎯 **Core Features Overview**: Open `🌟 EdgeEver Core Features Overview` on the left for a full tour of visual tables, syntax highlighting, Mermaid diagrams, and AI Agent integration.\n- 📝 **Create & Edit**: Feel free to create, modify, or delete notes to test rich text and Markdown source editing.\n\nEnjoy exploring EdgeEver!",
-  },
   memo_demo_overview: {
     title: "🌟 EdgeEver Core Features Overview",
     markdown:
