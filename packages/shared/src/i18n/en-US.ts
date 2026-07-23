@@ -157,7 +157,7 @@ export const enUS = {
       "zen-whitespace": "Zen Whitespace",
       "moyu-ticket": "Moyu Ticket",
       "olive-journal": "Olive Journal",
-      "mdnice-nenqing": "Tender Green (MDNice)",
+      "mint-breeze": "Mint Breeze",
     },
     mermaidThemes: {
       "zinc-light": "Zinc Light",

@@ -29,7 +29,7 @@ export const EDITOR_THEME_NAMES = [
   "zen-whitespace",
   "moyu-ticket",
   "olive-journal",
-  "mdnice-nenqing",
+  "mint-breeze",
 ] as const;
 export type EditorThemeName = (typeof EDITOR_THEME_NAMES)[number];
 
@@ -78,6 +78,7 @@ export const getStoredMermaidTheme = (): MermaidThemeName => {
 export const getStoredEditorTheme = (): EditorThemeName => {
   if (typeof window === "undefined") return "default";
   const stored = window.localStorage.getItem(EDITOR_THEME_STORAGE_KEY);
+  if (stored === "mdnice-nenqing") return "mint-breeze";
   return EDITOR_THEME_NAMES.includes(stored as EditorThemeName) ? stored as EditorThemeName : "default";
 };
 

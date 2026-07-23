@@ -157,7 +157,7 @@ export const zhCN = {
       "zen-whitespace": "留白禅意风",
       "moyu-ticket": "摸鱼票据风",
       "olive-journal": "橄榄手记",
-      "mdnice-nenqing": "嫩青（MDNice）",
+      "mint-breeze": "薄荷青",
     },
     mermaidThemes: {
       "zinc-light": "Zinc 浅色",
