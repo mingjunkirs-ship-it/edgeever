@@ -315,6 +315,7 @@ export const MemoListPane = ({
   notebooks,
   notebook,
   memos,
+  sharedMemoIds,
   totalMemoCount,
   hasMoreMemos,
   isLoadingMoreMemos,
@@ -387,6 +388,7 @@ export const MemoListPane = ({
   notebooks: Notebook[];
   notebook: Notebook | null;
   memos: MemoSummary[];
+  sharedMemoIds: Set<string>;
   totalMemoCount: number;
   hasMoreMemos: boolean;
   isLoadingMoreMemos: boolean;
@@ -1364,6 +1366,7 @@ export const MemoListPane = ({
                 <MemoCard
                   key={memo.id}
                   memo={memo}
+                  isShared={sharedMemoIds.has(memo.id)}
                   selected={memo.id === selectedMemoId}
                   checked={selectedMemoIds.has(memo.id)}
                   dragMemoIds={selectedMemoIds.has(memo.id) ? Array.from(selectedMemoIds) : [memo.id]}

@@ -7,9 +7,10 @@ import {
   writeFileSync,
 } from "node:fs";
 import { dirname, resolve } from "node:path";
-import { normalizeD1MigrationSql, runWranglerSync } from "./wrangler-runner.mjs";
+import { normalizeD1MigrationSql, runWranglerSync, withTriggerCrons } from "./wrangler-runner.mjs";
 
 const PLACEHOLDER_D1_ID = "00000000-0000-0000-0000-000000000000";
+const MEMO_SHARE_UNLOCK_CLEANUP_CRON = "*/15 * * * *";
 const UUID_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -189,6 +190,7 @@ const runtimeVars = {
   EDGE_EVER_SESSION_TTL_DAYS: envValue("SESSION_TTL_DAYS"),
   EDGE_EVER_R2_BUCKET_NAME: envValue("R2_BUCKET_NAME"),
   EDGE_EVER_DEMO_MODE: envValue("DEMO_MODE"),
+  EDGE_EVER_DEMO_RESET_CRON: envValue("DEMO_RESET_CRON"),
   EDGE_EVER_LOCAL_DEMO_SEED: envValue("LOCAL_DEMO_SEED"),
   // Auth-free access is a local-development capability. Remote deployments
   // fail closed when credentials and users are both missing.
@@ -220,11 +222,10 @@ if (localDemoSeed && !["true", "false"].includes(localDemoSeed)) {
 if (demoMode === "true") {
   const demoResetCron = envValue("DEMO_RESET_CRON") || "0 19 * * *";
   changed = true;
-  config = `${config.trimEnd()}
-
-[triggers]
-crons = [${tomlString(demoResetCron)}]
-`;
+  config = withTriggerCrons(config, Array.from(new Set([
+    MEMO_SHARE_UNLOCK_CLEANUP_CRON,
+    demoResetCron,
+  ])));
 }
 
 const customDomain = envValue("CUSTOM_DOMAIN");

@@ -13,6 +13,8 @@ import {
   isMemoEditBindingValid,
   JsonBackupResourceMetadataSchema,
   MemoCreateSchema,
+  MemoShareUnlockSchema,
+  MemoShareUpdateSchema,
   MemoUpdateSchema,
   MergeMemosSchema,
   MoveMemosSchema,
@@ -29,6 +31,7 @@ import {
   type MemoDetail,
   type MemoEditSession,
   type MemoRevision,
+  type MemoShare,
   type MemoSummary,
   type MemoUpdateInput,
   type JsonBackupMemo,
@@ -49,6 +52,7 @@ import type { Context } from "hono";
 import { Hono } from "hono";
 import { deleteCookie, getCookie, setCookie } from "hono/cookie";
 import { cors } from "hono/cors";
+import { HTTPException } from "hono/http-exception";
 import openApiSpec from "../../../docs/openapi.json";
 import { hasBootstrapCredential, isSupportedPasswordHash, verifyBootstrapPassword } from "./auth-bootstrap";
 import {
@@ -78,12 +82,14 @@ import {
 type Bindings = {
   DB: D1Database;
   RESOURCES: R2Bucket;
+  ASSETS: Fetcher;
   EDGE_EVER_AUTH_USERNAME?: string;
   EDGE_EVER_AUTH_PASSWORD?: string;
   EDGE_EVER_AUTH_PASSWORD_HASH?: string;
   EDGE_EVER_SESSION_TTL_DAYS?: string;
   EDGE_EVER_R2_BUCKET_NAME?: string;
   EDGE_EVER_DEMO_MODE?: string;
+  EDGE_EVER_DEMO_RESET_CRON?: string;
   EDGE_EVER_LOCAL_DEMO_SEED?: string;
   EDGE_EVER_ALLOW_UNAUTHENTICATED?: string;
 };
@@ -269,6 +275,35 @@ type ResourceStatsRow = {
   attachment_count: number;
 };
 
+type MemoShareRow = {
+  memo_id: string;
+  workspace_id: string;
+  token: string;
+  is_enabled: number;
+  password_hash: string | null;
+  expires_at: string | null;
+  allow_attachments: number;
+  created_at: string;
+  updated_at: string;
+};
+
+type MemoShareUnlockAttemptRow = {
+  attempt_count: number;
+  window_started_at: string;
+  blocked_until: string | null;
+};
+
+type MemoShareUnlockLimitRow = MemoShareUnlockAttemptRow;
+
+type PublicSharedMemoRow = {
+  id: string;
+  title: string | null;
+  tags_json: string;
+  updated_at: string;
+  content_json: string;
+  content_markdown: string;
+};
+
 type AppContext = Context<{ Bindings: Bindings; Variables: { auth: AuthContext } }>;
 
 const SESSION_COOKIE = "edgeever_session";
@@ -281,6 +316,28 @@ const PASSWORD_HASH_ITERATIONS = 100_000;
 const PASSWORD_HASH_BYTES = 32;
 const PASSWORD_SALT_BYTES = 16;
 const SESSION_TOKEN_BYTES = 32;
+const MEMO_SHARE_TOKEN_BYTES = 32;
+const MEMO_SHARE_COOKIE_DAYS = 7;
+const MEMO_SHARE_TOKEN_PATTERN = /^[A-Za-z0-9_-]{43}$/;
+const MEMO_SHARE_UNLOCK_WINDOW_MS = 15 * 60 * 1000;
+const MEMO_SHARE_UNLOCK_MAX_ATTEMPTS = 5;
+const MEMO_SHARE_UNLOCK_BACKOFF_START = 3;
+const MEMO_SHARE_UNLOCK_MAX_BACKOFF_SECONDS = 5 * 60;
+const MEMO_SHARE_UNLOCK_GLOBAL_WINDOW_MS = 15 * 60 * 1000;
+const MEMO_SHARE_UNLOCK_GLOBAL_MAX_ATTEMPTS = 20;
+const MEMO_SHARE_UNLOCK_STATE_RETENTION_MS = 24 * 60 * 60 * 1000;
+const MEMO_SHARE_UNLOCK_MAX_BODY_BYTES = 8 * 1024;
+const MAX_PUBLIC_SHARE_CONTENT_JSON_CHARS = 5 * 1024 * 1024;
+const MAX_PUBLIC_SHARE_CONTENT_MARKDOWN_CHARS = 5 * 1024 * 1024;
+const MAX_PUBLIC_SHARE_CONTENT_NODES = 20_000;
+const MAX_PUBLIC_SHARE_CONTENT_DEPTH = 100;
+const MAX_PUBLIC_SHARE_ATTACHMENTS = 100;
+const PUBLIC_SHARE_EDGE_WINDOW_MS = 60 * 1000;
+const PUBLIC_SHARE_EDGE_MAX_MEMO_REQUESTS = 120;
+const PUBLIC_SHARE_EDGE_MAX_RESOURCE_REQUESTS = 30;
+const PUBLIC_SHARE_EDGE_MAX_UNLOCK_REQUESTS = 30;
+const PUBLIC_SHARE_EDGE_MAX_CLIENT_REQUESTS = 240;
+const PUBLIC_SHARE_EDGE_MAX_BUCKETS = 2048;
 const DEFAULT_SESSION_TTL_DAYS = 400;
 const MAX_SESSION_TTL_DAYS = 400;
 const DEFAULT_R2_BUCKET_NAME = "edgeever-resources";
@@ -388,6 +445,9 @@ const SUPPORTED_IMAGE_MIME_TYPES = new Set([
 
 const app = new Hono<{ Bindings: Bindings; Variables: { auth: AuthContext } }>();
 
+type PublicShareEdgeBucket = { count: number; resetAt: number };
+const publicShareEdgeBuckets = new Map<string, PublicShareEdgeBucket>();
+
 app.use(
   "/api/*",
   cors({
@@ -424,6 +484,15 @@ app.get("/api/health", async (c) => {
 });
 
 app.get("/api/openapi.json", (c) => c.json(openApiSpec));
+
+app.get("/share/*", async (c) => {
+  const response = await c.env.ASSETS.fetch(c.req.raw);
+  const headers = new Headers(response.headers);
+  headers.set("Cache-Control", "private, no-store, max-age=0");
+  headers.set("CDN-Cache-Control", "no-store");
+  headers.set("X-Robots-Tag", "noindex, nofollow, noarchive");
+  return new Response(response.body, { status: response.status, statusText: response.statusText, headers });
+});
 
 app.get("/api/v1/auth/session", async (c) => {
   const authMode = await getInstanceAuthMode(c.env);
@@ -759,6 +828,209 @@ app.post("/api/v1/auth/logout", async (c) => {
   return c.json({ ok: true });
 });
 
+app.use("/api/public/shares/*", async (c, next) => {
+  c.header("Cache-Control", "private, no-store, max-age=0");
+  c.header("CDN-Cache-Control", "no-store");
+  c.header("X-Robots-Tag", "noindex, nofollow, noarchive");
+  await next();
+});
+
+app.get("/api/public/shares/:token", async (c) => {
+  const token = getPublicShareTokenParam(c);
+  if (!token) {
+    return notFound(c, "Shared note not found or no longer available.");
+  }
+
+  const edgeRetryAfter = takePublicShareEdgeBudget(c, token, "memo");
+  if (edgeRetryAfter > 0) {
+    return publicShareRateLimited(c, edgeRetryAfter);
+  }
+
+  const share = await getPublicMemoShare(c.env.DB, token);
+  if (!share) {
+    return notFound(c, "Shared note not found or no longer available.");
+  }
+
+  const unlocked = await isMemoShareUnlocked(c, share);
+  setPublicShareCacheHeaders(c, share);
+  c.header("X-Robots-Tag", "noindex, nofollow, noarchive");
+
+  if (share.password_hash && !unlocked) {
+    return c.json({
+      share: {
+        token: share.token,
+        requiresPassword: true,
+        unlocked: false,
+        allowAttachments: Boolean(share.allow_attachments),
+        expiresAt: share.expires_at,
+        memo: null,
+        attachments: [],
+      },
+    });
+  }
+
+  const memo = await getPublicSharedMemo(c.env.DB, share.memo_id, share.workspace_id);
+  if (!memo) {
+    return notFound(c, "Shared note not found or no longer available.");
+  }
+
+  const publicResourceBase = `/api/public/shares/${encodeURIComponent(share.token)}/resources`;
+  const contentJson = parsePublicShareContentJson(memo.content_json, publicResourceBase);
+  const attachments = share.allow_attachments
+    ? await getPublicAttachmentRowsForMemo(c.env.DB, share.workspace_id, share.memo_id).then((rows) =>
+        rows.map((row) => ({
+          ...mapResource(row),
+          url: `${publicResourceBase}/${encodeURIComponent(row.id)}`,
+        }))
+      )
+    : [];
+
+  return c.json({
+    share: {
+      token: share.token,
+      requiresPassword: Boolean(share.password_hash),
+      unlocked: true,
+      allowAttachments: Boolean(share.allow_attachments),
+      expiresAt: share.expires_at,
+      memo: {
+        id: memo.id,
+        title: memo.title,
+        tags: parseJsonArray(memo.tags_json),
+        contentJson,
+        contentMarkdown: rewriteSharedMarkdownResourceUrls(memo.content_markdown, publicResourceBase),
+        updatedAt: memo.updated_at,
+      },
+      attachments,
+    },
+  });
+});
+
+app.post("/api/public/shares/:token/unlock", async (c) => {
+  const token = getPublicShareTokenParam(c);
+  if (!token) {
+    return notFound(c, "Shared note not found or no longer available.");
+  }
+
+  const edgeRetryAfter = takePublicShareEdgeBudget(c, token, "unlock");
+  if (edgeRetryAfter > 0) {
+    return shareUnlockRateLimited(c, edgeRetryAfter);
+  }
+
+  const declaredLength = c.req.header("Content-Length");
+  if (declaredLength !== null && Number(declaredLength) > MEMO_SHARE_UNLOCK_MAX_BODY_BYTES) {
+    return apiError(c, "request_body_too_large", "Request body is too large.", 413);
+  }
+
+  const share = await getPublicMemoShare(c.env.DB, token);
+  if (!share) {
+    return notFound(c, "Shared note not found or no longer available.");
+  }
+  if (!share.password_hash) {
+    return c.json({ ok: true });
+  }
+
+  if (await isMemoShareUnlocked(c, share)) {
+    c.header("Cache-Control", "private, no-store, max-age=0");
+    c.header("X-Robots-Tag", "noindex, nofollow, noarchive");
+    return c.json({ ok: true });
+  }
+
+  const reservation = await reserveMemoShareUnlockAttempt(c, share);
+  if (!reservation.allowed) {
+    return shareUnlockRateLimited(c, reservation.retryAfterSeconds);
+  }
+
+  let input: { password: string };
+  try {
+    input = await parseMemoShareUnlockBody(c);
+  } catch (error) {
+    if (!(error instanceof AppError)) throw error;
+    const retryAfterSeconds = await recordMemoShareUnlockFailure(
+      c.env.DB,
+      share.memo_id,
+      reservation.clientKey,
+      reservation.attemptCount,
+    );
+    if (retryAfterSeconds > 0) {
+      return shareUnlockRateLimited(c, retryAfterSeconds);
+    }
+    return apiError(c, error.code, error.message, error.status);
+  }
+
+  if (!(await verifyPassword(input.password, share.password_hash))) {
+    const retryAfterSeconds = await recordMemoShareUnlockFailure(
+      c.env.DB,
+      share.memo_id,
+      reservation.clientKey,
+      reservation.attemptCount,
+    );
+    if (retryAfterSeconds > 0) {
+      return shareUnlockRateLimited(c, retryAfterSeconds);
+    }
+    return unauthorized(c, "Share password is incorrect.");
+  }
+
+  await clearMemoShareUnlockAttempts(c.env.DB, share.memo_id, reservation.clientKey);
+
+  const maxAge = getMemoShareCookieMaxAge(share.expires_at);
+  setCookie(c, getMemoShareCookieName(share.token), await getMemoShareCookieValue(share), {
+    httpOnly: true,
+    secure: new URL(c.req.url).protocol === "https:",
+    sameSite: "Lax",
+    path: `/api/public/shares/${encodeURIComponent(share.token)}`,
+    maxAge,
+  });
+  c.header("Cache-Control", "private, no-store");
+  c.header("X-Robots-Tag", "noindex, nofollow, noarchive");
+  return c.json({ ok: true });
+});
+
+app.get("/api/public/shares/:token/resources/:resourceId", async (c) => {
+  const token = getPublicShareTokenParam(c);
+  if (!token) {
+    return notFound(c, "Shared resource not found.");
+  }
+
+  const edgeRetryAfter = takePublicShareEdgeBudget(c, token, "resource");
+  if (edgeRetryAfter > 0) {
+    return publicShareRateLimited(c, edgeRetryAfter);
+  }
+
+  const share = await getPublicMemoShare(c.env.DB, token);
+  if (!share || !(await isMemoShareUnlocked(c, share))) {
+    return notFound(c, "Shared resource not found.");
+  }
+  const resource = await getResourceRow(c.env.DB, share.workspace_id, c.req.param("resourceId"));
+  if (!resource || resource.memo_id !== share.memo_id || (resource.kind === "attachment" && !share.allow_attachments)) {
+    return notFound(c, "Shared resource not found.");
+  }
+  const object = await c.env.RESOURCES.get(resource.object_key);
+  if (!object) {
+    return notFound(c, "Shared resource not found.");
+  }
+  const headers = new Headers();
+  object.writeHttpMetadata(headers);
+  const mimeType = (resource.mime_type ?? headers.get("Content-Type") ?? "application/octet-stream").toLowerCase();
+  const inline = resource.kind === "image" && PUBLIC_INLINE_RESOURCE_MIME_TYPES.has(mimeType);
+  headers.set("Content-Type", mimeType);
+  headers.set("Content-Disposition", inline ? contentDispositionInline(resource.filename) : contentDispositionAttachment(resource.filename));
+  if (typeof object.size === "number") headers.set("Content-Length", String(object.size));
+  headers.set("X-Content-Type-Options", "nosniff");
+  headers.set("Cross-Origin-Resource-Policy", "same-origin");
+  headers.set(
+    "Content-Security-Policy",
+    inline ? "default-src 'none'; img-src 'self' data:; style-src 'unsafe-inline'" : "sandbox; default-src 'none'",
+  );
+  setPublicShareCacheHeaders(c, share);
+  headers.set("Cache-Control", getPublicShareCacheControl(share));
+  headers.set(
+    "CDN-Cache-Control",
+    "no-store",
+  );
+  headers.set("X-Robots-Tag", "noindex, nofollow, noarchive");
+  return new Response(object.body, { headers });
+});
+
 app.use("/api/v1/*", async (c, next) => {
   if (c.req.path.startsWith("/api/v1/auth/")) {
     await next();
@@ -794,6 +1066,74 @@ app.use("/api/v1/*", async (c, next) => {
 
   c.set("auth", auth);
   await next();
+});
+
+app.get("/api/v1/memo-shares", async (c) => {
+  const userOnly = requireUser(c);
+  if (userOnly) return userOnly;
+  const rows = await c.env.DB.prepare(
+    `SELECT memo_id, workspace_id, token, is_enabled, password_hash, expires_at,
+            allow_attachments, created_at, updated_at
+     FROM memo_shares WHERE workspace_id = ? ORDER BY updated_at DESC`
+  ).bind(getWorkspaceId(c)).all<MemoShareRow>();
+  return c.json({ shares: rows.results.map((row) => mapMemoShare(row, c.req.url)) });
+});
+
+app.get("/api/v1/memos/:id/share", async (c) => {
+  const userOnly = requireUser(c);
+  if (userOnly) return userOnly;
+  const row = await getMemoShareRow(c.env.DB, getWorkspaceId(c), c.req.param("id"));
+  return c.json({ share: row ? mapMemoShare(row, c.req.url) : null });
+});
+
+app.put("/api/v1/memos/:id/share", zValidator("json", MemoShareUpdateSchema), async (c) => {
+  const userOnly = requireUser(c);
+  if (userOnly) return userOnly;
+  const memoId = c.req.param("id");
+  const workspaceId = getWorkspaceId(c);
+  const memo = await c.env.DB.prepare(
+    `SELECT id FROM memos WHERE id = ? AND workspace_id = ? AND is_deleted = 0`
+  ).bind(memoId, workspaceId).first<{ id: string }>();
+  if (!memo) return notFound(c, "Memo not found.");
+
+  const input = c.req.valid("json");
+  const existing = await getMemoShareRow(c.env.DB, workspaceId, memoId);
+  const now = isoNow();
+  const passwordHash = input.password === undefined
+    ? existing?.password_hash ?? null
+    : input.password === null
+      ? null
+      : await hashPassword(input.password);
+  const expiresAt = input.expiresAt === undefined ? existing?.expires_at ?? null : input.expiresAt;
+  if (input.enabled && expiresAt && expiresAt <= now) {
+    return badRequest(c, "Share expiration must be in the future.");
+  }
+
+  if (existing) {
+    await c.env.DB.prepare(
+      `UPDATE memo_shares SET is_enabled = ?, password_hash = ?, expires_at = ?,
+              allow_attachments = ?, updated_at = ?
+       WHERE memo_id = ? AND workspace_id = ?`
+    ).bind(input.enabled ? 1 : 0, passwordHash, expiresAt, input.allowAttachments ? 1 : 0, now, memoId, workspaceId).run();
+  } else {
+    await c.env.DB.prepare(
+      `INSERT INTO memo_shares (
+         memo_id, workspace_id, token, is_enabled, password_hash, expires_at,
+         allow_attachments, created_at, updated_at
+       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    ).bind(
+      memoId, workspaceId, randomToken(MEMO_SHARE_TOKEN_BYTES), input.enabled ? 1 : 0,
+      passwordHash, expiresAt, input.allowAttachments ? 1 : 0, now, now
+    ).run();
+  }
+
+  await c.env.DB.prepare(
+    `DELETE FROM memo_share_unlock_attempts WHERE memo_id = ?`
+  ).bind(memoId).run();
+  await clearMemoShareUnlockLimit(c.env.DB, memoId);
+
+  const row = await getMemoShareRow(c.env.DB, workspaceId, memoId);
+  return c.json({ share: row ? mapMemoShare(row, c.req.url) : null });
 });
 
 app.get("/api/v1/api-tokens", async (c) => {
@@ -2645,11 +2985,12 @@ const worker = {
     return app.fetch(request, env, ctx);
   },
   async scheduled(controller: ScheduledController, env: Bindings, ctx: ExecutionContext) {
-    if (!isDemoMode(env)) {
-      return;
+    const tasks: Promise<unknown>[] = [cleanupMemoShareUnlockState(env.DB, controller.scheduledTime)];
+    const demoResetCron = env.EDGE_EVER_DEMO_RESET_CRON?.trim() || "0 19 * * *";
+    if (isDemoMode(env) && controller.cron === demoResetCron) {
+      tasks.push(resetDemoData(env, controller.scheduledTime, { resetCredentials: true }));
     }
-
-    ctx.waitUntil(resetDemoData(env, controller.scheduledTime, { resetCredentials: true }));
+    ctx.waitUntil(Promise.all(tasks));
   },
 };
 
@@ -2666,6 +3007,10 @@ app.notFound((c) =>
 );
 
 app.onError((error, c) => {
+  if (error instanceof HTTPException) {
+    return error.getResponse();
+  }
+
   if (error instanceof AppError) {
     return apiError(c, error.code, error.message, error.status);
   }
@@ -4386,6 +4731,467 @@ const mapResourceStorageSummary = (row: ResourceStatsRow | null): ResourceStorag
   imageCount: row?.image_count ?? 0,
   attachmentCount: row?.attachment_count ?? 0,
 });
+
+const mapMemoShare = (row: MemoShareRow, requestUrl: string): MemoShare => {
+  const origin = new URL(requestUrl).origin;
+  const active = Boolean(row.is_enabled) && (!row.expires_at || row.expires_at > isoNow());
+  return {
+    memoId: row.memo_id,
+    token: row.token,
+    url: `${origin}/share/${encodeURIComponent(row.token)}`,
+    enabled: Boolean(row.is_enabled),
+    active,
+    requiresPassword: Boolean(row.password_hash),
+    expiresAt: row.expires_at,
+    allowAttachments: Boolean(row.allow_attachments),
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  };
+};
+
+const getMemoShareRow = (db: D1Database, workspaceId: string, memoId: string) =>
+  db.prepare(
+    `SELECT memo_id, workspace_id, token, is_enabled, password_hash, expires_at,
+            allow_attachments, created_at, updated_at
+     FROM memo_shares WHERE memo_id = ? AND workspace_id = ?`
+  ).bind(memoId, workspaceId).first<MemoShareRow>();
+
+const getPublicMemoShare = async (db: D1Database, token: string) => {
+  const row = await db.prepare(
+    `SELECT memo_id, workspace_id, token, is_enabled, password_hash, expires_at,
+            allow_attachments, created_at, updated_at
+     FROM memo_shares
+     WHERE token = ? AND is_enabled = 1 AND (expires_at IS NULL OR expires_at > ?)`
+  ).bind(token, isoNow()).first<MemoShareRow>();
+  return row ?? null;
+};
+
+const getPublicSharedMemo = (db: D1Database, memoId: string, workspaceId: string) =>
+  db.prepare(
+    `SELECT m.id, m.title, m.tags_json, m.updated_at,
+            substr(mc.content_json, 1, ?) AS content_json,
+            substr(mc.content_markdown, 1, ?) AS content_markdown
+     FROM memos m INNER JOIN memo_contents mc ON mc.memo_id = m.id
+     WHERE m.id = ? AND m.workspace_id = ? AND m.is_deleted = 0`
+  ).bind(
+    MAX_PUBLIC_SHARE_CONTENT_JSON_CHARS + 1,
+    MAX_PUBLIC_SHARE_CONTENT_MARKDOWN_CHARS + 1,
+    memoId,
+    workspaceId,
+  ).first<PublicSharedMemoRow>();
+
+const getMemoShareCookieName = (token: string) => `edgeever_share_${token.slice(0, 16)}`;
+
+const getMemoShareCookieValue = (share: MemoShareRow) =>
+  sha256(`edgeever-share-access:${share.token}:${share.password_hash ?? "public"}`);
+
+const isMemoShareUnlocked = async (c: AppContext, share: MemoShareRow) => {
+  if (!share.password_hash) return true;
+  const cookie = getCookie(c, getMemoShareCookieName(share.token));
+  return Boolean(cookie && cookie === await getMemoShareCookieValue(share));
+};
+
+const getMemoShareCookieMaxAge = (expiresAt: string | null) => {
+  const defaultMaxAge = MEMO_SHARE_COOKIE_DAYS * 24 * 60 * 60;
+  if (!expiresAt) return defaultMaxAge;
+  return Math.max(1, Math.min(defaultMaxAge, Math.floor((Date.parse(expiresAt) - Date.now()) / 1000)));
+};
+
+const getMemoShareUnlockRetryAfter = (blockedUntil: string | null, now = Date.now()) => {
+  if (!blockedUntil) return 0;
+  const blockedUntilMs = Date.parse(blockedUntil);
+  return Number.isFinite(blockedUntilMs) && blockedUntilMs > now
+    ? Math.max(1, Math.ceil((blockedUntilMs - now) / 1000))
+    : 0;
+};
+
+const getPublicShareCacheControl = (_share: MemoShareRow) => "private, no-store, max-age=0";
+
+const setPublicShareCacheHeaders = (c: Context, share: MemoShareRow) => {
+  c.header("Cache-Control", getPublicShareCacheControl(share));
+  c.header("CDN-Cache-Control", "no-store");
+};
+
+const getPublicShareTokenParam = (c: AppContext) => {
+  const token = c.req.param("token") ?? "";
+  return MEMO_SHARE_TOKEN_PATTERN.test(token) ? token : null;
+};
+
+const takePublicShareEdgeBucket = (key: string, maxRequests: number, now: number) => {
+  const current = publicShareEdgeBuckets.get(key);
+  if (current && current.resetAt > now) {
+    if (current.count >= maxRequests) {
+      return Math.max(1, Math.ceil((current.resetAt - now) / 1000));
+    }
+    current.count += 1;
+    return 0;
+  }
+
+  if (current) publicShareEdgeBuckets.delete(key);
+  if (publicShareEdgeBuckets.size >= PUBLIC_SHARE_EDGE_MAX_BUCKETS) {
+    for (const [bucketKey, bucket] of publicShareEdgeBuckets) {
+      if (bucket.resetAt <= now) publicShareEdgeBuckets.delete(bucketKey);
+    }
+    while (publicShareEdgeBuckets.size >= PUBLIC_SHARE_EDGE_MAX_BUCKETS) {
+      const oldestKey = publicShareEdgeBuckets.keys().next().value as string | undefined;
+      if (!oldestKey) break;
+      publicShareEdgeBuckets.delete(oldestKey);
+    }
+  }
+
+  publicShareEdgeBuckets.set(key, { count: 1, resetAt: now + PUBLIC_SHARE_EDGE_WINDOW_MS });
+  return 0;
+};
+
+const takePublicShareEdgeBudget = (c: AppContext, token: string, scope: "memo" | "resource" | "unlock") => {
+  const client = c.req.header("CF-Connecting-IP")
+    ?? c.req.header("X-Forwarded-For")?.split(",", 1)[0]?.trim()
+    ?? "unknown";
+  const now = Date.now();
+  const maxRequests = scope === "resource"
+    ? PUBLIC_SHARE_EDGE_MAX_RESOURCE_REQUESTS
+    : scope === "unlock"
+      ? PUBLIC_SHARE_EDGE_MAX_UNLOCK_REQUESTS
+      : PUBLIC_SHARE_EDGE_MAX_MEMO_REQUESTS;
+  const clientRetryAfter = takePublicShareEdgeBucket(
+    `client:${client}`,
+    PUBLIC_SHARE_EDGE_MAX_CLIENT_REQUESTS,
+    now,
+  );
+  if (clientRetryAfter > 0) return clientRetryAfter;
+
+  const scopedRetryAfter = takePublicShareEdgeBucket(
+    `${scope}:${token}:${client}`,
+    maxRequests,
+    now,
+  );
+  return scopedRetryAfter;
+};
+
+const extendMemoShareUnlockBlock = async (
+  db: D1Database,
+  memoId: string,
+  clientKey: string,
+  blockedUntil: string,
+) => {
+  await db.prepare(
+    `UPDATE memo_share_unlock_attempts
+     SET blocked_until = CASE
+           WHEN blocked_until IS NULL OR blocked_until < ? THEN ?
+           ELSE blocked_until
+         END,
+         updated_at = ?
+     WHERE memo_id = ? AND client_key = ?`
+  ).bind(blockedUntil, blockedUntil, isoNow(), memoId, clientKey).run();
+};
+
+const extendMemoShareUnlockLimitBlock = async (
+  db: D1Database,
+  memoId: string,
+  blockedUntil: string,
+) => {
+  await db.prepare(
+    `UPDATE memo_share_unlock_limits
+     SET blocked_until = CASE
+           WHEN blocked_until IS NULL OR blocked_until < ? THEN ?
+           ELSE blocked_until
+         END,
+         updated_at = ?
+     WHERE memo_id = ?`
+  ).bind(blockedUntil, blockedUntil, isoNow(), memoId).run();
+};
+
+const reserveMemoShareUnlockLimit = async (db: D1Database, memoId: string) => {
+  const nowMs = Date.now();
+  const now = new Date(nowMs).toISOString();
+  const existing = await db.prepare(
+    `SELECT attempt_count, window_started_at, blocked_until
+     FROM memo_share_unlock_limits
+     WHERE memo_id = ?`
+  ).bind(memoId).first<MemoShareUnlockLimitRow>();
+  const existingRetryAfter = getMemoShareUnlockRetryAfter(existing?.blocked_until ?? null, nowMs);
+
+  if (existingRetryAfter > 0) {
+    return { allowed: false as const, retryAfterSeconds: existingRetryAfter };
+  }
+
+  const windowCutoff = new Date(nowMs - MEMO_SHARE_UNLOCK_GLOBAL_WINDOW_MS).toISOString();
+  const attempt = await db.prepare(
+    `INSERT INTO memo_share_unlock_limits (
+       memo_id, attempt_count, window_started_at, blocked_until, updated_at
+     ) VALUES (?, 1, ?, NULL, ?)
+     ON CONFLICT(memo_id) DO UPDATE SET
+       attempt_count = CASE
+         WHEN memo_share_unlock_limits.window_started_at <= ? THEN 1
+         ELSE memo_share_unlock_limits.attempt_count + 1
+       END,
+       window_started_at = CASE
+         WHEN memo_share_unlock_limits.window_started_at <= ? THEN excluded.window_started_at
+         ELSE memo_share_unlock_limits.window_started_at
+       END,
+       blocked_until = CASE
+         WHEN memo_share_unlock_limits.window_started_at <= ? THEN NULL
+         ELSE memo_share_unlock_limits.blocked_until
+       END,
+       updated_at = excluded.updated_at
+     RETURNING attempt_count, window_started_at, blocked_until`
+  ).bind(memoId, now, now, windowCutoff, windowCutoff, windowCutoff).first<MemoShareUnlockLimitRow>();
+
+  if (!attempt) {
+    throw new AppError("share_unlock_rate_limit_failed", "Could not reserve a share unlock limit.", 503);
+  }
+
+  const concurrentRetryAfter = getMemoShareUnlockRetryAfter(attempt.blocked_until, nowMs);
+  if (concurrentRetryAfter > 0) {
+    return { allowed: false as const, retryAfterSeconds: concurrentRetryAfter };
+  }
+
+  if (attempt.attempt_count > MEMO_SHARE_UNLOCK_GLOBAL_MAX_ATTEMPTS) {
+    const windowStartedMs = Date.parse(attempt.window_started_at);
+    const windowEndsAt = (Number.isFinite(windowStartedMs) ? windowStartedMs : nowMs) + MEMO_SHARE_UNLOCK_GLOBAL_WINDOW_MS;
+    const retryAfterSeconds = Math.max(1, Math.ceil((windowEndsAt - nowMs) / 1000));
+    await extendMemoShareUnlockLimitBlock(db, memoId, new Date(windowEndsAt).toISOString());
+    return { allowed: false as const, retryAfterSeconds };
+  }
+
+  return { allowed: true as const };
+};
+
+const reserveMemoShareUnlockAttempt = async (c: AppContext, share: MemoShareRow) => {
+  const nowMs = Date.now();
+  const now = new Date(nowMs).toISOString();
+  const clientIp = c.req.header("CF-Connecting-IP") ?? "unknown";
+  const clientKey = await sha256(`edgeever-share-unlock:${share.token}:${clientIp}`);
+  const existing = await c.env.DB.prepare(
+    `SELECT attempt_count, window_started_at, blocked_until
+     FROM memo_share_unlock_attempts
+     WHERE memo_id = ? AND client_key = ?`
+  ).bind(share.memo_id, clientKey).first<MemoShareUnlockAttemptRow>();
+  const existingRetryAfter = getMemoShareUnlockRetryAfter(existing?.blocked_until ?? null, nowMs);
+
+  if (existingRetryAfter > 0) {
+    return { allowed: false as const, retryAfterSeconds: existingRetryAfter };
+  }
+
+  const windowCutoff = new Date(nowMs - MEMO_SHARE_UNLOCK_WINDOW_MS).toISOString();
+  const attempt = await c.env.DB.prepare(
+    `INSERT INTO memo_share_unlock_attempts (
+       memo_id, client_key, attempt_count, window_started_at, blocked_until, updated_at
+     ) VALUES (?, ?, 1, ?, NULL, ?)
+     ON CONFLICT(memo_id, client_key) DO UPDATE SET
+       attempt_count = CASE
+         WHEN memo_share_unlock_attempts.window_started_at <= ? THEN 1
+         ELSE memo_share_unlock_attempts.attempt_count + 1
+       END,
+       window_started_at = CASE
+         WHEN memo_share_unlock_attempts.window_started_at <= ? THEN excluded.window_started_at
+         ELSE memo_share_unlock_attempts.window_started_at
+       END,
+       blocked_until = CASE
+         WHEN memo_share_unlock_attempts.window_started_at <= ? THEN NULL
+         ELSE memo_share_unlock_attempts.blocked_until
+       END,
+       updated_at = excluded.updated_at
+     RETURNING attempt_count, window_started_at, blocked_until`
+  ).bind(
+    share.memo_id,
+    clientKey,
+    now,
+    now,
+    windowCutoff,
+    windowCutoff,
+    windowCutoff,
+  ).first<MemoShareUnlockAttemptRow>();
+
+  if (!attempt) {
+    throw new AppError("share_unlock_rate_limit_failed", "Could not reserve a share unlock attempt.", 503);
+  }
+
+  const concurrentRetryAfter = getMemoShareUnlockRetryAfter(attempt.blocked_until, nowMs);
+  if (concurrentRetryAfter > 0) {
+    return { allowed: false as const, retryAfterSeconds: concurrentRetryAfter };
+  }
+
+  if (attempt.attempt_count > MEMO_SHARE_UNLOCK_MAX_ATTEMPTS) {
+    const windowStartedMs = Date.parse(attempt.window_started_at);
+    const windowEndsAt = (Number.isFinite(windowStartedMs) ? windowStartedMs : nowMs) + MEMO_SHARE_UNLOCK_WINDOW_MS;
+    const retryAfterSeconds = Math.max(1, Math.ceil((windowEndsAt - nowMs) / 1000));
+    await extendMemoShareUnlockBlock(
+      c.env.DB,
+      share.memo_id,
+      clientKey,
+      new Date(windowEndsAt).toISOString(),
+    );
+    return { allowed: false as const, retryAfterSeconds };
+  }
+
+  const globalLimit = await reserveMemoShareUnlockLimit(c.env.DB, share.memo_id);
+  if (!globalLimit.allowed) {
+    return globalLimit;
+  }
+
+  return {
+    allowed: true as const,
+    clientKey,
+    attemptCount: attempt.attempt_count,
+  };
+};
+
+const recordMemoShareUnlockFailure = async (
+  db: D1Database,
+  memoId: string,
+  clientKey: string,
+  attemptCount: number,
+) => {
+  if (attemptCount < MEMO_SHARE_UNLOCK_BACKOFF_START) return 0;
+  const retryAfterSeconds = Math.min(
+    MEMO_SHARE_UNLOCK_MAX_BACKOFF_SECONDS,
+    2 ** (attemptCount - MEMO_SHARE_UNLOCK_BACKOFF_START + 1),
+  );
+  await extendMemoShareUnlockBlock(
+    db,
+    memoId,
+    clientKey,
+    new Date(Date.now() + retryAfterSeconds * 1000).toISOString(),
+  );
+  return retryAfterSeconds;
+};
+
+const clearMemoShareUnlockAttempts = (db: D1Database, memoId: string, clientKey: string) =>
+  db.prepare(
+    `DELETE FROM memo_share_unlock_attempts WHERE memo_id = ? AND client_key = ?`
+  ).bind(memoId, clientKey).run();
+
+const clearMemoShareUnlockLimit = (db: D1Database, memoId: string) =>
+  db.prepare(`DELETE FROM memo_share_unlock_limits WHERE memo_id = ?`).bind(memoId).run();
+
+const cleanupMemoShareUnlockState = async (db: D1Database, nowMs = Date.now()) => {
+  const cutoff = new Date(nowMs - MEMO_SHARE_UNLOCK_STATE_RETENTION_MS).toISOString();
+  await db.prepare(`DELETE FROM memo_share_unlock_attempts WHERE updated_at < ?`).bind(cutoff).run();
+  await db.prepare(`DELETE FROM memo_share_unlock_limits WHERE updated_at < ?`).bind(cutoff).run();
+};
+
+const readBoundedRequestBody = async (request: Request, maxBytes: number) => {
+  const contentLength = request.headers.get("Content-Length");
+  if (contentLength !== null) {
+    const parsedLength = Number(contentLength);
+    if (Number.isFinite(parsedLength) && parsedLength > maxBytes) {
+      throw new AppError("request_body_too_large", "Request body is too large.", 413);
+    }
+  }
+
+  if (!request.body) return "";
+
+  const reader = request.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let totalBytes = 0;
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      if (!value) continue;
+      totalBytes += value.byteLength;
+      if (totalBytes > maxBytes) {
+        try {
+          await reader.cancel();
+        } catch {
+          // The request can already be closed by the edge runtime.
+        }
+        throw new AppError("request_body_too_large", "Request body is too large.", 413);
+      }
+      chunks.push(value);
+    }
+  } finally {
+    reader.releaseLock();
+  }
+
+  const bytes = new Uint8Array(totalBytes);
+  let offset = 0;
+  for (const chunk of chunks) {
+    bytes.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  return new TextDecoder().decode(bytes);
+};
+
+const parseMemoShareUnlockBody = async (c: AppContext) => {
+  const contentType = c.req.header("Content-Type") ?? "";
+  if (!/^application\/json(?:\s*;|$)/i.test(contentType)) {
+    throw new AppError("invalid_request_body", "Unlock requests must use application/json.", 400);
+  }
+
+  const body = await readBoundedRequestBody(c.req.raw, MEMO_SHARE_UNLOCK_MAX_BODY_BYTES);
+  let value: unknown;
+  try {
+    value = JSON.parse(body);
+  } catch {
+    throw new AppError("invalid_request_body", "Unlock request body must be valid JSON.", 400);
+  }
+
+  const parsed = MemoShareUnlockSchema.safeParse(value);
+  if (!parsed.success) {
+    throw new AppError("invalid_request_body", "Unlock request body is invalid.", 400);
+  }
+  return parsed.data;
+};
+
+const decodeSharedResourceId = (value: string) => {
+  try {
+    return decodeURIComponent(value);
+  } catch {
+    // Keep malformed percent escapes inert; the resulting encoded URL will
+    // simply produce a 404 instead of turning the whole share into a 500.
+    return value;
+  }
+};
+
+const rewriteSharedResourceUrl = (value: string, publicResourceBase: string) =>
+  value.replace(/\/api\/v1\/resources\/([^/\s)"']+)\/blob/g, (_match, resourceId: string) =>
+    `${publicResourceBase}/${encodeURIComponent(decodeSharedResourceId(resourceId))}`
+  );
+
+const rewriteSharedResourceUrls = <T,>(value: T, publicResourceBase: string): T => {
+  const state = { nodes: 0 };
+  const visit = (current: unknown, depth: number): unknown => {
+    state.nodes += 1;
+    if (state.nodes > MAX_PUBLIC_SHARE_CONTENT_NODES || depth > MAX_PUBLIC_SHARE_CONTENT_DEPTH) {
+      throw new AppError("shared_content_too_complex", "Shared note content is too complex to render.", 413);
+    }
+    if (typeof current === "string") return rewriteSharedResourceUrl(current, publicResourceBase);
+    if (Array.isArray(current)) return current.map((item) => visit(item, depth + 1));
+    if (current && typeof current === "object") {
+      return Object.fromEntries(
+        Object.entries(current as Record<string, unknown>).map(([key, item]) => [key, visit(item, depth + 1)])
+      );
+    }
+    return current;
+  };
+  return visit(value, 0) as T;
+};
+
+const parsePublicShareContentJson = (json: string, publicResourceBase: string) => {
+  if (json.length > MAX_PUBLIC_SHARE_CONTENT_JSON_CHARS) {
+    throw new AppError("shared_content_too_large", "Shared note content is too large to render.", 413);
+  }
+
+  try {
+    const parsed = JSON.parse(json) as unknown;
+    if (!parsed || typeof parsed !== "object" || (parsed as { type?: unknown }).type !== "doc") {
+      throw new Error("Shared content is not a Tiptap document.");
+    }
+    return rewriteSharedResourceUrls(parsed as TiptapDoc, publicResourceBase);
+  } catch (error) {
+    if (error instanceof AppError) throw error;
+    throw new AppError("shared_content_invalid", "Shared note content is invalid.", 422);
+  }
+};
+
+const rewriteSharedMarkdownResourceUrls = (markdown: string, publicResourceBase: string) => {
+  if (markdown.length > MAX_PUBLIC_SHARE_CONTENT_MARKDOWN_CHARS) {
+    throw new AppError("shared_content_too_large", "Shared note content is too large to render.", 413);
+  }
+  return rewriteSharedResourceUrl(markdown, publicResourceBase);
+};
 
 const mapApiToken = (row: ApiTokenRow): ApiToken => ({
   id: row.id,
@@ -6189,6 +6995,27 @@ const getResourceRowsForMemo = async (db: D1Database, workspaceId: string, memoI
   return rows.results;
 };
 
+const getPublicAttachmentRowsForMemo = async (
+  db: D1Database,
+  workspaceId: string,
+  memoId: string,
+): Promise<ResourceRow[]> => {
+  const rows = await db
+    .prepare(
+      `SELECT r.id, r.memo_id, r.original_memo_id, r.bucket_name, r.object_key, r.kind, r.mime_type,
+              r.filename, r.byte_size, r.sha256, r.width, r.height, r.created_at, r.updated_at
+       FROM resources r
+       INNER JOIN memos m ON m.id = r.memo_id
+       WHERE r.memo_id = ? AND m.workspace_id = ? AND r.is_deleted = 0 AND r.kind = 'attachment'
+       ORDER BY r.created_at ASC, r.id ASC
+       LIMIT ?`
+    )
+    .bind(memoId, workspaceId, MAX_PUBLIC_SHARE_ATTACHMENTS)
+    .all<ResourceRow>();
+
+  return rows.results;
+};
+
 const listResourcesForMemo = async (db: D1Database, workspaceId: string, memoId: string): Promise<Resource[]> => {
   const rows = await db
     .prepare(
@@ -6492,23 +7319,27 @@ const normalizeFilename = (filename: string) =>
     .replace(/[\u0000-\u001f\u007f]/g, "")
     .slice(0, 160);
 
+const PUBLIC_INLINE_RESOURCE_MIME_TYPES = new Set([
+  "image/png",
+  "image/jpeg",
+  "image/gif",
+  "image/webp",
+  "image/avif",
+]);
+
+const contentDisposition = (filename: string | null, disposition: "inline" | "attachment") => {
+  if (!filename) return disposition;
+  const safeFilename = normalizeFilename(filename);
+  if (!safeFilename) return disposition;
+  const fallback = safeFilename.replace(/"/g, "'");
+  return `${disposition}; filename="${fallback}"; filename*=UTF-8''${encodeURIComponent(safeFilename)}`;
+};
+
 const contentDispositionInline = (filename: string | null) => {
-  if (!filename) {
-    return "inline";
-  }
-
-  const fallback = normalizeFilename(filename).replace(/"/g, "'");
-  return `inline; filename="${fallback}"; filename*=UTF-8''${encodeURIComponent(filename)}`;
+  return contentDisposition(filename, "inline");
 };
 
-const contentDispositionAttachment = (filename: string | null) => {
-  if (!filename) {
-    return "attachment";
-  }
-
-  const fallback = normalizeFilename(filename).replace(/"/g, "'");
-  return `attachment; filename="${fallback}"; filename*=UTF-8''${encodeURIComponent(filename)}`;
-};
+const contentDispositionAttachment = (filename: string | null) => contentDisposition(filename, "attachment");
 
 const decodeTagParam = (value: string) => {
   try {
@@ -6588,6 +7419,26 @@ const unauthorized = (c: Context, message: string) =>
     },
     401
   );
+
+const shareUnlockRateLimited = (c: Context, retryAfterSeconds: number) => {
+  c.header("Retry-After", String(Math.max(1, Math.ceil(retryAfterSeconds))));
+  return apiError(
+    c,
+    "share_unlock_rate_limited",
+    "Too many share password attempts. Try again later.",
+    429,
+  );
+};
+
+const publicShareRateLimited = (c: Context, retryAfterSeconds: number) => {
+  c.header("Retry-After", String(Math.max(1, Math.ceil(retryAfterSeconds))));
+  return apiError(
+    c,
+    "public_share_rate_limited",
+    "Too many public share requests. Try again later.",
+    429,
+  );
+};
 
 const forbidden = (c: Context, message: string) =>
   c.json(

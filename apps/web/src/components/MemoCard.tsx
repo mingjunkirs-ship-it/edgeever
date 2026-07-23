@@ -1,6 +1,6 @@
 import { useRef, useState, useEffect, type DragEvent, type MouseEvent, type PointerEvent as ReactPointerEvent, type KeyboardEvent as ReactKeyboardEvent } from "react";
 import { useTranslation } from "react-i18next";
-import { Star, Check, MoreHorizontal, RotateCcw, Trash2 } from "lucide-react";
+import { Star, Check, MoreHorizontal, RotateCcw, Share2, Trash2 } from "lucide-react";
 import type { MemoSummary } from "@edgeever/shared";
 import { cn } from "@/lib/utils";
 import type { MemoListDensity } from "@/lib/app-helpers";
@@ -39,6 +39,7 @@ const formatMemoPreviewDate = (value: string, locale: string, yesterdayLabel: st
 
 export const MemoCard = ({
   memo,
+  isShared,
   selected,
   checked,
   dragMemoIds,
@@ -56,6 +57,7 @@ export const MemoCard = ({
   onToggle,
 }: {
   memo: MemoSummary;
+  isShared: boolean;
   selected: boolean;
   checked: boolean;
   dragMemoIds: string[];
@@ -369,6 +371,7 @@ export const MemoCard = ({
         >
           <div className={cn("mb-2 flex min-w-0 items-center gap-1.5 text-base font-semibold leading-6 text-slate-950 lg:text-base", listDensity === "compact" && "mb-1")}>
             {memo.isPinned && <Star className="h-4 w-4 shrink-0 fill-current text-slate-500" />}
+            {isShared && <Share2 className="h-4 w-4 shrink-0 text-emerald-600" aria-label={t("share.activeBadge")} />}
             <span className="min-w-0 truncate">{memoTitle}</span>
           </div>
           <div

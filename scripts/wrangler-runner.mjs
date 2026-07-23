@@ -25,6 +25,14 @@ export const buildWranglerEnvironment = (args, env = process.env) => ({
 
 export const normalizeD1MigrationSql = (sql) => sql.replace(/\r\n?/g, "\n");
 
+export const withTriggerCrons = (source, crons) => {
+  const block = `[triggers]\ncrons = [${crons.map((cron) => JSON.stringify(cron)).join(", ")}]`;
+  const sectionPattern = /(^|\n)\[triggers\]\r?\n[\s\S]*?(?=\r?\n\[|$)/;
+  return sectionPattern.test(source)
+    ? source.replace(sectionPattern, (_match, prefix) => `${prefix}${block}`)
+    : `${source.trimEnd()}\n\n${block}\n`;
+};
+
 export const buildWranglerSpawnOptions = (args, options = {}) => {
   if (!isD1MigrationApplyCommand(args) || options.input !== undefined) {
     return options;

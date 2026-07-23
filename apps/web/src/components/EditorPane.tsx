@@ -1,5 +1,5 @@
 import { useRef, useState, useEffect, useCallback, useMemo, type PointerEvent as ReactPointerEvent, type ReactNode } from "react";
-import { useQueryClient, useMutation } from "@tanstack/react-query";
+import { useQuery, useQueryClient, useMutation } from "@tanstack/react-query";
 import { NodeViewWrapper, ReactNodeViewRenderer, useEditor, EditorContent, type Editor, type NodeViewProps } from "@tiptap/react";
 import { Plugin, PluginKey } from "@tiptap/pm/state";
 import { Decoration, DecorationSet } from "@tiptap/pm/view";
@@ -7,6 +7,7 @@ import StarterKit from "@tiptap/starter-kit";
 import Image from "@tiptap/extension-image";
 import Placeholder from "@tiptap/extension-placeholder";
 import { TableKit } from "@tiptap/extension-table";
+import { marked } from "marked";
 import { useTranslation } from "react-i18next";
 import {
   ChevronLeft,
@@ -19,6 +20,8 @@ import {
   Save,
   ReplaceAll,
   MoreHorizontal,
+  FileDown,
+  Share2,
   Maximize2,
   Minimize2,
   Paperclip,
@@ -59,8 +62,10 @@ import { WeChatIcon } from "./WeChatIcon";
 import { ThemeToggle } from "./ThemeToggle";
 import { useTheme } from "./ThemeProvider";
 import { RevisionHistoryDialog } from "./dialogs/RevisionHistoryDialog";
+import { MemoShareDialog } from "./dialogs/MemoShareDialog";
 import { api } from "@/lib/api";
 import { consumeStandaloneMobileEditorReturn, openStandaloneMobileEditor } from "@/lib/mobile-editor";
+import { exportMemoToPdf } from "@/lib/pdf-export";
 import { cn, formatDateTime, parseTagsText } from "@/lib/utils";
 import {
   countMemoCharacters,
@@ -83,6 +88,7 @@ import { compressImageForUpload } from "@/lib/image-compression";
 import { localDb, type MemoUpdateSyncPayload } from "@/lib/local-db";
 import { getMemoUpdateQueueId, isMemoUpdateAlreadyApplied, queueMemoUpdate, shouldQueueMemoSaveError } from "@/lib/sync-queue";
 import {
+  DEFAULT_MEMO_TITLE,
   getEditableMemoTitle,
   getNotebookMoveOptions,
 } from "@/lib/app-helpers";
@@ -1130,6 +1136,7 @@ const RichEditorPane = ({
   const [editorContentVersion, setEditorContentVersion] = useState(0);
   const [imageUploadState, setImageUploadState] = useState<"idle" | "compressing" | "uploading" | "error">("idle");
   const [historyOpen, setHistoryOpen] = useState(false);
+  const [shareOpen, setShareOpen] = useState(false);
   const [mobileNotebookSheetOpen, setMobileNotebookSheetOpen] = useState(false);
   const [notebookUpdatePending, setNotebookUpdatePending] = useState(false);
   const [noteSearchOpen, setNoteSearchOpen] = useState(false);
@@ -1150,6 +1157,12 @@ const RichEditorPane = ({
   const [mobileImeDebugEvents, setMobileImeDebugEvents] = useState<MobileImeDebugEntry[]>([]);
   const [wechatCopyState, setWechatCopyState] = useState<"idle" | "copied" | "error">("idle");
   const notebookOptions = useMemo(() => getNotebookMoveOptions(notebooks), [notebooks]);
+  const shareQuery = useQuery({
+    queryKey: ["memo-share", memo?.id],
+    queryFn: () => api.getMemoShare(memo!.id),
+    enabled: Boolean(memo?.id && !memo.isDeleted),
+  });
+  const activeShare = shareQuery.data?.share?.active ? shareQuery.data.share : null;
   const readOnly = isTrashView || Boolean(memo?.isDeleted);
   const mobileDefaultEditRequested = Boolean(memo?.id && memo.id === mobileDefaultEditMemoId && !readOnly);
   const mobileEditingActive = isMobileEditing || mobileDefaultEditRequested;
@@ -2530,6 +2543,11 @@ const RichEditorPane = ({
             <span className={cn("hidden rounded-md px-2 py-1 text-xs font-medium sm:inline-flex", saveStateClassName)}>
               {saveLabel}
             </span>
+            {activeShare && (
+              <button type="button" className="hidden items-center gap-1 rounded-full bg-emerald-50 px-2 py-1 text-xs font-semibold text-emerald-700 sm:inline-flex" onClick={() => setShareOpen(true)}>
+                <Share2 className="h-3.5 w-3.5" />{t("share.activeBadge")}
+              </button>
+            )}
             <span className={cn("inline-flex max-w-[5.5rem] truncate rounded-full px-2 py-1 text-[11px] font-medium sm:hidden", mobileStatusClassName)}>
               {mobileStatusLabel}
             </span>
@@ -2659,6 +2677,31 @@ const RichEditorPane = ({
                 >
                   <History className="h-4 w-4 text-slate-500" />
                   {t("editor.versionHistory")}
+                </DropdownMenuItem>
+                {!readOnly && (
+                  <DropdownMenuItem
+                    className="flex h-9 w-full items-center gap-2 px-3 text-left text-sm text-slate-700 hover:bg-slate-50 cursor-pointer outline-none"
+                    onClick={() => setShareOpen(true)}
+                  >
+                    <Share2 className="h-4 w-4 text-slate-500" />
+                    {t("share.menu")}
+                  </DropdownMenuItem>
+                )}
+                <DropdownMenuItem
+                  className="flex h-9 w-full items-center gap-2 px-3 text-left text-sm text-slate-700 hover:bg-slate-50 cursor-pointer outline-none"
+                  onClick={() => void exportMemoToPdf({
+                    title: title.trim() || DEFAULT_MEMO_TITLE,
+                    tags: parseTagsText(tagsText),
+                    updatedAt: hasUnsavedChanges ? new Date().toISOString() : memo.updatedAt,
+                    bodyHtml: useMobilePlainTextEditor
+                      ? String(marked.parse(getMobilePlainTextValue()))
+                      : useMarkdownSourceEditor
+                        ? String(marked.parse(markdownSource))
+                        : editor?.getHTML() ?? "",
+                  })}
+                >
+                  <FileDown className="h-4 w-4 text-slate-500" />
+                  {t("share.exportPdf")}
                 </DropdownMenuItem>
                 {readOnly ? (
                   <>
@@ -2852,6 +2895,8 @@ const RichEditorPane = ({
           />
         )}
       </header>
+
+      {!readOnly && <MemoShareDialog memoId={memo.id} open={shareOpen} onOpenChange={setShareOpen} />}
 
       <div
         ref={editorScrollContainerRef}

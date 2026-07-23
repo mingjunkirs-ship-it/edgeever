@@ -60,6 +60,29 @@ export type MemoRevision = {
   createdAt: string;
 };
 
+export type MemoShare = {
+  memoId: string;
+  token: string;
+  url: string;
+  enabled: boolean;
+  active: boolean;
+  requiresPassword: boolean;
+  expiresAt: string | null;
+  allowAttachments: boolean;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type PublicMemoShare = {
+  token: string;
+  requiresPassword: boolean;
+  unlocked: boolean;
+  allowAttachments: boolean;
+  expiresAt: string | null;
+  memo: Pick<MemoDetail, "id" | "title" | "tags" | "contentJson" | "contentMarkdown" | "updatedAt"> | null;
+  attachments: Resource[];
+};
+
 export type ResourceKind = "image" | "attachment";
 
 export type Resource = {

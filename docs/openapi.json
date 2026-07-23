@@ -67,6 +67,50 @@
         }
       }
     },
+    "/api/public/shares/{token}": {
+      "get": {
+        "summary": "Read a public memo share",
+        "security": [],
+        "parameters": [{ "name": "token", "in": "path", "required": true, "schema": { "type": "string" } }],
+        "responses": { "200": { "description": "Share state and unlocked memo content" }, "404": { "$ref": "#/components/responses/Error" } }
+      }
+    },
+    "/api/public/shares/{token}/unlock": {
+      "post": {
+        "summary": "Unlock a password-protected memo share",
+        "security": [],
+        "parameters": [{ "name": "token", "in": "path", "required": true, "schema": { "type": "string" } }],
+        "requestBody": { "required": true, "content": { "application/json": { "schema": { "type": "object", "additionalProperties": false, "properties": { "password": { "type": "string", "minLength": 1, "maxLength": 512 } }, "required": ["password"] } } } },
+        "responses": { "200": { "description": "Share access cookie created" }, "401": { "$ref": "#/components/responses/Error" }, "404": { "$ref": "#/components/responses/Error" }, "429": { "$ref": "#/components/responses/Error" } }
+      }
+    },
+    "/api/public/shares/{token}/resources/{resourceId}": {
+      "get": {
+        "summary": "Read an authorized public share resource",
+        "security": [],
+        "parameters": [
+          { "name": "token", "in": "path", "required": true, "schema": { "type": "string" } },
+          { "name": "resourceId", "in": "path", "required": true, "schema": { "type": "string" } }
+        ],
+        "responses": { "200": { "description": "Resource body" }, "404": { "$ref": "#/components/responses/Error" } }
+      }
+    },
+    "/api/v1/memo-shares": {
+      "get": { "summary": "List memo share settings", "responses": { "200": { "description": "Memo shares in the current workspace" } } }
+    },
+    "/api/v1/memos/{id}/share": {
+      "get": {
+        "summary": "Read one memo's share settings",
+        "parameters": [{ "name": "id", "in": "path", "required": true, "schema": { "type": "string" } }],
+        "responses": { "200": { "description": "Memo share settings" } }
+      },
+      "put": {
+        "summary": "Create or update one memo's share settings",
+        "parameters": [{ "name": "id", "in": "path", "required": true, "schema": { "type": "string" } }],
+        "requestBody": { "required": true, "content": { "application/json": { "schema": { "type": "object", "properties": { "enabled": { "type": "boolean" }, "password": { "type": ["string", "null"], "minLength": 8, "maxLength": 512 }, "expiresAt": { "type": ["string", "null"], "format": "date-time" }, "allowAttachments": { "type": "boolean" } }, "required": ["enabled", "allowAttachments"] } } } },
+        "responses": { "200": { "description": "Updated memo share settings" }, "404": { "$ref": "#/components/responses/Error" } }
+      }
+    },
     "/api/v1/auth/session": {
       "get": {
         "summary": "Read interactive session",

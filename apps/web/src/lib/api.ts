@@ -10,6 +10,8 @@ import type {
   MemoDetail,
   MemoEditSession,
   MemoRevision,
+  MemoShare,
+  PublicMemoShare,
   MemoSummary,
   Notebook,
   Resource,
@@ -85,6 +87,10 @@ type NotebookResponse = {
 type ResourceResponse = {
   resource: Resource;
 };
+
+type MemoShareResponse = { share: MemoShare | null };
+type ListMemoSharesResponse = { shares: MemoShare[] };
+type PublicMemoShareResponse = { share: PublicMemoShare };
 
 export type MarkdownExportPage = {
   memos: MemoDetail[];
@@ -318,6 +324,25 @@ export const api = {
 
   listMemoRevisions: (memoId: string) =>
     request<ListMemoRevisionsResponse>(`/api/v1/memos/${memoId}/revisions`),
+
+  listMemoShares: () => request<ListMemoSharesResponse>("/api/v1/memo-shares"),
+
+  getMemoShare: (memoId: string) => request<MemoShareResponse>(`/api/v1/memos/${memoId}/share`),
+
+  updateMemoShare: (memoId: string, payload: { enabled: boolean; password?: string | null; expiresAt?: string | null; allowAttachments: boolean }) =>
+    request<MemoShareResponse>(`/api/v1/memos/${memoId}/share`, {
+      method: "PUT",
+      body: JSON.stringify(payload),
+    }),
+
+  getPublicMemoShare: (token: string) =>
+    request<PublicMemoShareResponse>(`/api/public/shares/${encodeURIComponent(token)}`),
+
+  unlockPublicMemoShare: (token: string, password: string) =>
+    request<{ ok: true }>(`/api/public/shares/${encodeURIComponent(token)}/unlock`, {
+      method: "POST",
+      body: JSON.stringify({ password }),
+    }),
 
   restoreMemoRevision: (memoId: string, revisionId: string) =>
     request<MemoResponse>(`/api/v1/memos/${memoId}/revisions/${revisionId}/restore`, {

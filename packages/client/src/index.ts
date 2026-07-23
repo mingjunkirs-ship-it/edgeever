@@ -11,6 +11,8 @@ import type {
   MemoDetail,
   MemoEditSession,
   MemoRevision,
+  MemoShare,
+  PublicMemoShare,
   MemoSummary,
   Notebook,
   Resource,
@@ -81,6 +83,10 @@ export type NotebookResponse = {
 export type ResourceResponse = {
   resource: Resource;
 };
+
+export type MemoShareResponse = { share: MemoShare | null };
+export type ListMemoSharesResponse = { shares: MemoShare[] };
+export type PublicMemoShareResponse = { share: PublicMemoShare };
 
 export type MarkdownExportPage = {
   memos: MemoDetail[];
@@ -365,6 +371,16 @@ export const createEdgeEverClient = (options: EdgeEverClientOptions = {}) => {
       }),
 
     listMemoRevisions: (memoId: string) => request<ListMemoRevisionsResponse>(`/api/v1/memos/${memoId}/revisions`),
+
+    listMemoShares: () => request<ListMemoSharesResponse>("/api/v1/memo-shares"),
+
+    getMemoShare: (memoId: string) => request<MemoShareResponse>(`/api/v1/memos/${memoId}/share`),
+
+    updateMemoShare: (memoId: string, payload: { enabled: boolean; password?: string | null; expiresAt?: string | null; allowAttachments: boolean }) =>
+      request<MemoShareResponse>(`/api/v1/memos/${memoId}/share`, {
+        method: "PUT",
+        body: JSON.stringify(payload),
+      }),
 
     restoreMemoRevision: (memoId: string, revisionId: string) =>
       request<MemoResponse>(`/api/v1/memos/${memoId}/revisions/${revisionId}/restore`, {

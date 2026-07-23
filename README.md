@@ -43,6 +43,8 @@ The public demo resets every Monday at 1:00 AM (China Standard Time) and restore
 - Switch between Markdown source and rich text views on desktop.
 - Mermaid diagrams rendered from standard fenced code blocks on the Web and native app, with editable source preserved across rich text and Markdown views.
 - Note version history for reviewing previous content changes.
+- Per-note read-only sharing with stable unguessable links, optional passwords and expiration, revocable access, and separate attachment-publication control.
+- Export an individual note to PDF through the browser's native print-to-PDF flow, preserving local fonts and inline images.
 - Local browser-side image compression before upload, often reducing screenshots and large photos by about 50%-90%.
 - Upload and insert general file attachments such as PDFs, office documents, archives, audio, and video into notes.
 - Batch note merging.

@@ -815,6 +815,11 @@ export const WorkspaceApp = ({
     queryKey: ["notebooks"],
     queryFn: () => api.listNotebooks(),
   });
+  const memoSharesQuery = useQuery({ queryKey: ["memo-shares"], queryFn: () => api.listMemoShares() });
+  const sharedMemoIds = useMemo(
+    () => new Set((memoSharesQuery.data?.shares ?? []).filter((share) => share.active).map((share) => share.memoId)),
+    [memoSharesQuery.data?.shares]
+  );
 
   const notebooks = notebooksQuery.data?.notebooks ?? [];
   useEffect(() => {
@@ -2472,6 +2477,7 @@ export const WorkspaceApp = ({
               notebooks={notebooks}
               view={memoView}
               memos={memos}
+              sharedMemoIds={sharedMemoIds}
               totalMemoCount={totalMemoCount}
               hasMoreMemos={Boolean(memosQuery.hasNextPage)}
               isLoadingMoreMemos={memosQuery.isFetchingNextPage}
